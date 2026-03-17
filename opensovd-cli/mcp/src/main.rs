@@ -361,7 +361,14 @@ mod tests {
         let client = setup(mock_client(builder.build())).await;
 
         let result = client
+<<<<<<< HEAD
             .read_resource(ReadResourceRequestParams::new(TOPOLOGY_URI))
+=======
+            .read_resource(ReadResourceRequestParams {
+                meta: None,
+                uri: TOPOLOGY_URI.into(),
+            })
+>>>>>>> 58d16bc (chore: initial import (#25))
             .await?;
 
         let text = match &result.contents[0] {
@@ -403,7 +410,15 @@ mod tests {
         let client = setup(mock_client(connector)).await;
 
         let result = client
+<<<<<<< HEAD
             .get_prompt(GetPromptRequestParams::new("explore-topology"))
+=======
+            .get_prompt(GetPromptRequestParams {
+                meta: None,
+                name: "explore-topology".into(),
+                arguments: None,
+            })
+>>>>>>> 58d16bc (chore: initial import (#25))
             .await?;
 
         assert!(!result.messages.is_empty(), "expected at least one message");
@@ -438,7 +453,16 @@ mod tests {
         let client = setup(mock_client(builder.build())).await;
 
         let result = client
+<<<<<<< HEAD
             .call_tool(CallToolRequestParams::new("list_components"))
+=======
+            .call_tool(CallToolRequestParams {
+                meta: None,
+                name: "list_components".into(),
+                arguments: None,
+                task: None,
+            })
+>>>>>>> 58d16bc (chore: initial import (#25))
             .await?;
 
         let structured = result
@@ -467,7 +491,16 @@ mod tests {
         let client = setup(mock_client(builder.build())).await;
 
         let result = client
+<<<<<<< HEAD
             .call_tool(CallToolRequestParams::new("list_areas"))
+=======
+            .call_tool(CallToolRequestParams {
+                meta: None,
+                name: "list_areas".into(),
+                arguments: None,
+                task: None,
+            })
+>>>>>>> 58d16bc (chore: initial import (#25))
             .await?;
 
         let structured = result
@@ -496,7 +529,16 @@ mod tests {
         let client = setup(mock_client(builder.build())).await;
 
         let result = client
+<<<<<<< HEAD
             .call_tool(CallToolRequestParams::new("list_apps"))
+=======
+            .call_tool(CallToolRequestParams {
+                meta: None,
+                name: "list_apps".into(),
+                arguments: None,
+                task: None,
+            })
+>>>>>>> 58d16bc (chore: initial import (#25))
             .await?;
 
         let structured = result

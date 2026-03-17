@@ -717,6 +717,7 @@ mod tests {
     }
 
     #[tokio::test]
+<<<<<<< HEAD
     async fn test_write_guard_read_through_deref() {
         let topology = Topology::new();
         let mut t = topology.write().await;
@@ -726,6 +727,8 @@ mod tests {
     }
 
     #[tokio::test]
+=======
+>>>>>>> 58d16bc (chore: initial import (#25))
     async fn test_remove_area_then_reinsert_no_stale_data() {
         use crate::entity::Area;
 

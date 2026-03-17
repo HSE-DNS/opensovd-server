@@ -3,11 +3,19 @@
 
 """Pytest integration for Bruno test files."""
 
+<<<<<<< HEAD
+=======
+import shlex
+>>>>>>> 58d16bc (chore: initial import (#25))
 import shutil
 import subprocess
 
 import pytest
+<<<<<<< HEAD
 from fixtures import LISTENING_PATTERN, default_binary_args, listening_url, spawn_process
+=======
+from fixtures import default_gateway_args, spawn_gateway
+>>>>>>> 58d16bc (chore: initial import (#25))
 
 
 def pytest_collect_file(parent, file_path):
@@ -20,6 +28,15 @@ def pytest_collect_file(parent, file_path):
         return BrunoFile.from_parent(parent, path=file_path)
 
 
+<<<<<<< HEAD
+=======
+def _get_gateway_args(config) -> list[str]:
+    """Return gateway args (matches tests/conftest.py gateway_args fixture)."""
+    args = shlex.split(config.getoption("--opensovd-args"))
+    return args or default_gateway_args(config)
+
+
+>>>>>>> 58d16bc (chore: initial import (#25))
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_setup(item):
     """Spawn gateway for Bruno tests."""
@@ -29,18 +46,33 @@ def pytest_runtest_setup(item):
     if shutil.which("bru") is None:
         pytest.skip("bru CLI not installed")
 
+<<<<<<< HEAD
     if not hasattr(item.config, "_bruno_process"):
         proc = spawn_process(item.config, default_binary_args(item.config), LISTENING_PATTERN)
         item.config._bruno_process = proc
         if proc.match is not None:
             item.config._gateway_base_url = listening_url(proc.match)
+=======
+    if not hasattr(item.config, "_bruno_gateway"):
+        gw = spawn_gateway(item.config, _get_gateway_args(item.config))
+        item.config._bruno_gateway = gw
+
+    gw = item.config._bruno_gateway
+    if gw.base_url:
+        item.config._gateway_base_url = gw.base_url
+>>>>>>> 58d16bc (chore: initial import (#25))
 
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
     """Clean up gateway."""
+<<<<<<< HEAD
     if hasattr(session.config, "_bruno_process"):
         session.config._bruno_process.close()
+=======
+    if hasattr(session.config, "_bruno_gateway"):
+        session.config._bruno_gateway.close()
+>>>>>>> 58d16bc (chore: initial import (#25))
 
 
 class BrunoFile(pytest.File):
