@@ -127,6 +127,12 @@ where
     builder = configure_listener(builder, &cli, authority).await?;
     builder = configure_topology(builder, &cli).await;
 
+    // CDA Provider registrieren
+    builder = builder.discovery(Box::new(opensovd_providers::cda::CdaProvider::new(
+        "testcontainer-cda-1",
+        20002,
+    )));
+
     let cors = cors::create_cors_layer(
         &cli.cors.origins,
         &cli.cors.methods,
