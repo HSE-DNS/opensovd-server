@@ -142,6 +142,11 @@ where
             builder = builder.tls(tls_config);
         }
     }
+    // CDA Provider registrieren
+    builder = builder.discovery(Box::new(opensovd_providers::cda::CdaProvider::new(
+        "testcontainer-cda-1",
+        20002,
+    )));
 
     let cors = cors::create_cors_layer(
         &cli.cors.origins,
