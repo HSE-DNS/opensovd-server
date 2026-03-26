@@ -143,10 +143,15 @@ where
         }
     }
     // CDA Provider registrieren
-    builder = builder.discovery(Box::new(opensovd_providers::cda::CdaProvider::new(
-        "testcontainer-cda-1",
-        20002,
-    )));
+    if let Some(cda_host) = cli.cda.host {
+        builder = builder.discovery(Box::new(opensovd_providers::cda::CdaProvider::new(
+            cda_host,
+            cli.cda.port,
+            cli.cda.base_path,
+            cli.cda.token,
+        )));
+        tracing::info!(target: TARGET, "CDA discovery provider enabled");
+    }
 
     let cors = cors::create_cors_layer(
         &cli.cors.origins,
