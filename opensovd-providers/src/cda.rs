@@ -6,18 +6,22 @@ pub struct CdaProvider {
     port: u16,
     base_path: String,
     token: String,
+    client: reqwest::Client,
 }
 
 impl CdaProvider {
-    pub fn new(host: impl Into<String>, port: u16) -> Self {
-        let token = std::env::var("CDA_TOKEN").unwrap_or_default();
-        let base_path =
-            std::env::var("CDA_BASE_PATH").unwrap_or_else(|_| "/vehicle/v15".to_string());
+    pub fn new(
+        host: impl Into<String>,
+        port: u16,
+        base_path: impl Into<String>,
+        token: impl Into<String>,
+    ) -> Self {
         Self {
             host: host.into(),
             port,
-            base_path,
-            token,
+            base_path: base_path.into(),
+            token: token.into(),
+            client: reqwest::Client::new(),
         }
     }
 
@@ -32,8 +36,7 @@ impl CdaProvider {
     ) -> Result<(reqwest::StatusCode, String), reqwest::Error> {
         let url = format!("http://{}:{}{}", self.host, self.port, path);
 
-        let client = reqwest::Client::new();
-        let response = client
+        let response = self.client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.token))
             .send()
@@ -54,6 +57,7 @@ pub struct CdaDataProvider {
     token: String,
     /// Stores (ID, Name) tuples of available data points.
     data_points: Vec<(String, String)>,
+    client: reqwest::Client,
 }
 
 #[async_trait::async_trait]
@@ -90,8 +94,7 @@ impl opensovd_core::DataProvider for CdaDataProvider {
             self.cda_host, self.cda_port, self.base_path, self.component_id, data_id
         );
 
-        let client = reqwest::Client::new();
-        let response = match client
+        let response = match self.client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.token))
             .send()
@@ -145,14 +148,12 @@ impl opensovd_core::DataProvider for CdaDataProvider {
             self.cda_host, self.cda_port, self.base_path, self.component_id, data_id
         );
 
-        let client = reqwest::Client::new();
-
         // Wrap payload in a "data" object required by the CDA.
         let payload = serde_json::json!({
             "data": value
         });
 
-        let response = match client
+        let response = match self.client
             .put(&url)
             .header("Authorization", format!("Bearer {}", self.token))
             .header("Content-Type", "application/json")
@@ -219,7 +220,8 @@ impl DiscoveryProvider for CdaProvider {
                         Ok(json) => {
                             tracing::info!("Successfully parsed JSON from CDA:\n{json:#?}");
 
-                            if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
+                            let items_array = json.get("items").and_then(|v| v.as_array()).or_else(|| json.as_array());
+                            if let Some(items) = items_array {
                                 if items.is_empty() {
                                     tracing::info!(
                                         "Info: The 'items' list from CDA is currently empty."
@@ -253,10 +255,11 @@ impl DiscoveryProvider for CdaProvider {
                                                             &data_text,
                                                         )
                                                     {
-                                                        if let Some(data_items) = data_json
-                                                            .get("items")
+                                                        let data_items_array = data_json.get("items")
                                                             .and_then(|v| v.as_array())
-                                                        {
+                                                            .or_else(|| data_json.as_array());
+
+                                                        if let Some(data_items) = data_items_array {
                                                             for data_item in data_items {
                                                                 let data_id = data_item
                                                                     .get("id")
@@ -301,6 +304,7 @@ impl DiscoveryProvider for CdaProvider {
                                             base_path: self.base_path.clone(),
                                             token: self.token.clone(),
                                             data_points: found_data,
+                                        client: self.client.clone(),
                                         };
                                         cda_component = cda_component.with_data_provider(provider);
 
