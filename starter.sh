@@ -3,18 +3,60 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 CDA_DIR="../classic-diagnostic-adapter"
+PID_FILE="$SCRIPT_DIR/.sovd-gateway.pid"
 
-# in das testcontainer Verzeichnis des CDA wechseln 
-cd $SCRIPT_DIR/$CDA_DIR
-cd testcontainer
 
-# Testcontainer starten
-docker-compose up -d
-sleep 20 
+start() {
+    # in das testcontainer Verzeichnis des CDA wechseln 
+    cd $SCRIPT_DIR/$CDA_DIR/testcontainer
 
-# Token holen
-export ACCESS_TOKEN=$(curl -s -X POST -H "Content-Type: application/json" "http://localhost:20002/vehicle/v15/authorize" --data '{"client_id":"test", "client_secret":"secret"}' | jq -r .access_token)
+    # Testcontainer starten
+    echo "starting CDA testcontainer..."
+    docker-compose up -d
+    sleep 20 
 
-# SOVD Server mit diesem Token starten
-cd $SCRIPT_DIR
-CDA_TOKEN="$ACCESS_TOKEN" cargo run -p opensovd-gateway -- --url http://0.0.0.0:7690/sovd --cda-host localhost --cda-port 20002 --cda-base-path "/vehicle/v15"
+    # Token holen
+    echo "getting CDA access token..."
+    export ACCESS_TOKEN=$(curl -s -X POST -H "Content-Type: application/json" "http://localhost:20002/vehicle/v15/authorize" --data '{"client_id":"test", "client_secret":"secret"}' | jq -r .access_token)
+
+    # SOVD Server mit diesem Token starten
+    echo "starting SOVD server..."
+    cd $SCRIPT_DIR
+    cargo build -p opensovd-gateway
+    CDA_TOKEN="$ACCESS_TOKEN" ./target/debug/opensovd-gateway --url http://0.0.0.0:7690/sovd --cda-host localhost --cda-port 20002 --cda-base-path "/vehicle/v15" & echo $! > $PID_FILE
+    echo "SOVD server started successfully, PID $(cat $PID_FILE)"
+}
+
+stop() {
+    echo "stopping SOVD server..."
+    if [ -f "$PID_FILE" ]; then
+        kill $(cat $PID_FILE) 2>/dev/null || true
+        rm $PID_FILE
+    fi
+    echo "OSVD server shut down successfully"
+
+    echo "stopping CDA testcontainer..."
+    cd $SCRIPT_DIR/$CDA_DIR/testcontainer
+    docker-compose down
+    echo "CDA testcontainer shut down successfully"
+}
+
+case "$1" in 
+    start)
+       start
+       ;;
+    stop)
+       stop
+       ;;
+    restart)
+       stop
+       start
+       ;;
+    status)
+       docker-compose ps
+       ;;
+    *)
+       echo "Usage: $0 can be started with the follwing arguments: {start|stop|status|restart}."
+esac
+
+exit 0 
