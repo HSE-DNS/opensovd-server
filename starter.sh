@@ -33,12 +33,17 @@ stop() {
         kill $(cat $PID_FILE) 2>/dev/null || true
         rm $PID_FILE
     fi
-    echo "OSVD server shut down successfully"
+    echo "SOVD server shut down successfully"
 
     echo "stopping CDA testcontainer..."
     cd $SCRIPT_DIR/$CDA_DIR/testcontainer
     docker-compose down
     echo "CDA testcontainer shut down successfully"
+}
+
+status() {
+    cd $SCRIPT_DIR/$CDA_DIR/testcontainer
+    docker-compose ps
 }
 
 case "$1" in 
@@ -53,7 +58,7 @@ case "$1" in
        start
        ;;
     status)
-       docker-compose ps
+       status
        ;;
     *)
        echo "Usage: $0 can be started with the follwing arguments: {start|stop|status|restart}."
