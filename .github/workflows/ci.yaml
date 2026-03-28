@@ -8,8 +8,8 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
-  schedule:
-    - cron: '0 2 * * *' # 02:00 UTC daily
+  #schedule:
+  #  - cron: '0 2 * * *' # 02:00 UTC daily
   workflow_dispatch:
 
 concurrency:
