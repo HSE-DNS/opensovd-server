@@ -1,49 +1,72 @@
-use std::pin::Pin;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use opensovd_core::{
     Component, Data, DataError, DataFilter, DataProvider, DiscoveryError, DiscoveryProvider,
     EntityCollection, EntityRef, Metadata,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::pin::Pin;
 use zenoh::Session;
 
+/// CENTRAL CONFIGURATION
+/// Change these values to adapt to your specific robot environment.
+pub struct ZenohConfig {  //opensovd-cli/src/main.rs
+    /// The network address of the Zenoh Router (e.g., "127.0.0.1:7447" or "192.168.1.50:7447")
+    pub endpoint: String,
+    /// The Zenoh selector used to find robots. 
+    /// Use "**" for everything or "robots/**" to filter for specific prefixes.
+    pub discovery_selector: String,
+    /// Defines which part of the Zenoh path is the Robot Name.
+    /// Index 0 means the first part (e.g., "RobotA/sensor" -> "RobotA")
+    pub robot_name_index: usize,
+}
+
+impl Default for ZenohConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: "tcp/localhost:7447".to_string(),
+            discovery_selector: "**".to_string(),
+            robot_name_index: 0,
+        }
+    }
+}
 
 pub struct ZenohProvider {
     session: Session,
+    config: ZenohConfig,
 }
 
 impl ZenohProvider {
-    /// Initialisiert einen neuen `ZenohProvider`.
+    /// Initializes a new `ZenohProvider` using a central config.
     ///
     /// # Errors
     ///
-    /// Gibt einen Fehler zurück, wenn die Zenoh-Konfiguration ungültig ist oder die 
-    /// Verbindung zum Router fehlschlägt.
-    pub async fn new(endpoint: &str) -> anyhow::Result<Self> {
-        let mut config = zenoh::Config::default();
+    /// Returns an error if the Zenoh configuration is invalid or the 
+    /// connection to the Zenoh router fails.
+    pub async fn new(config: ZenohConfig) -> anyhow::Result<Self> {
+        let mut zenoh_config = zenoh::Config::default();
+        
+        zenoh_config.insert_json5("mode", r#""client""#).map_err(|e| anyhow!("{e}"))?;
+        
+        let endpoints_json = format!(r#"["{}"]"#, config.endpoint);
+        zenoh_config.insert_json5("connect/endpoints", &endpoints_json).map_err(|e| anyhow!("{e}"))?;
 
- 
-        config
-            .insert_json5("mode", r#""client""#)
-            .map_err(|e| anyhow!("Failed to set Zenoh mode: {e}"))?;
-
-        let endpoints_json = format!(r#"["{endpoint}"]"#);
-        config
-            .insert_json5("connect/endpoints", &endpoints_json)
-            .map_err(|e| anyhow!("Failed to set Zenoh endpoints: {e}"))?;
-
-        let session = zenoh::open(config)
-            .await
-            .map_err(|e| anyhow!("Failed to connect to Zenoh router: {e}"))?;
-
-        tracing::info!("ZenohProvider erfolgreich mit Router verbunden");
-        Ok(Self { session })
+        let session = zenoh::open(zenoh_config).await.map_err(|e| anyhow!("{e}"))?;
+        tracing::info!("ZenohProvider connected to {}", config.endpoint);
+        
+        Ok(Self { session, config })
     }
 }
 
 #[async_trait]
 impl DiscoveryProvider for ZenohProvider {
+    /// Discovers robots and their data points in the Zenoh network.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `DiscoveryError::Other` if the Zenoh session fails to 
+    /// perform the GET request or if the network communication is interrupted.
     async fn discover(
         &self,
     ) -> Result<
@@ -51,23 +74,53 @@ impl DiscoveryProvider for ZenohProvider {
         DiscoveryError,
     > {
         let mut collection = EntityCollection::default();
-
-        let data_points = vec![
-            ("battery_soc".to_string(), "Battery State of Charge".to_string()),
-            ("vehicle_location".to_string(), "Vehicle GPS Location".to_string()),
-        ];
-
-        tracing::info!("Zenoh-Fahrzeug mit {} Datenpunkt(en) registriert!", data_points.len());
         
-        let mut component = Component::new("zenoh_car", "Zenoh Connected Car");
-        let data_provider = ZenohDataProvider {
-            session: self.session.clone(),
-            key_prefix: "my-vehicle".to_string(),
-            data_points,
-        };
+        tracing::info!("Starting discovery with selector: {}", self.config.discovery_selector);
 
-        component = component.with_data_provider(data_provider);
-        collection.components.push(component);
+        let replies = self.session.get(&self.config.discovery_selector)
+            .await
+            .map_err(|e| DiscoveryError::Other(e.to_string().into()))?;
+
+        let mut robot_map: HashMap<String, Vec<(String, String)>> = HashMap::new();
+
+        while let Ok(reply) = replies.recv_async().await {
+            if let Ok(sample) = reply.result() {
+                let key = sample.key_expr().as_str();
+                let parts: Vec<&str> = key.split('/').collect();
+                
+                // Determine the robot name based on the index in the config
+                if let Some(robot_name) = parts.get(self.config.robot_name_index) {
+                    let robot_name_str = robot_name.to_string();
+                    
+                    // Filter out the robot name part to build the Data ID
+                    let data_parts: Vec<&str> = parts.iter()
+                        .enumerate()
+                        .filter(|&(i, _)| i != self.config.robot_name_index)
+                        .map(|(_, &s)| s)
+                        .collect();
+                    
+                    let data_id = data_parts.join("_");
+                    
+                    if !data_id.is_empty() {
+                        robot_map.entry(robot_name_str)
+                            .or_default()
+                            .push((data_id.clone(), data_id));
+                    }
+                }
+            }
+        }
+
+        for (robot_name, points) in robot_map {
+            tracing::info!("Component created: '{}' with {} items", robot_name, points.len());
+            let mut component = Component::new(robot_name.clone(), format!("Zenoh Robot {robot_name}"));
+            
+            component = component.with_data_provider(ZenohDataProvider {
+                session: self.session.clone(),
+                key_prefix: robot_name,
+                data_points: points,
+            });
+            collection.components.push(component);
+        }
 
         let stream = futures::stream::once(std::future::ready(Ok((vec![], collection))));
         Ok(Box::pin(stream))
@@ -84,66 +137,39 @@ pub struct ZenohDataProvider {
 #[async_trait]
 impl DataProvider for ZenohDataProvider {
     async fn list(&self, _filter: DataFilter) -> Result<Vec<Metadata>, DataError> {
-        let items = self
-            .data_points
-            .iter()
-            .map(|(id, name)| Metadata {
-                id: id.clone(),
-                name: name.clone(),
-                category: "zenoh-telemetry".to_string(),
-                translation_id: None,
-                groups: vec![],
-                tags: vec![],
-                schema: None,
-                is_readable: true,
-                is_writable: true,
-            })
-            .collect();
-        Ok(items)
+        Ok(self.data_points.iter().map(|(id, name)| Metadata {
+            id: id.clone(),
+            name: name.clone(),
+            category: "zenoh-telemetry".to_string(),
+            is_readable: true,
+            is_writable: true,
+            translation_id: None,
+            groups: vec![],
+            tags: vec![],
+            schema: None,
+        }).collect())
     }
 
     async fn read(&self, data_id: &str, _include_schema: bool) -> Result<Data, DataError> {
         let zenoh_id = data_id.replace('_', "/");
         let key = format!("{}/{}", self.key_prefix, zenoh_id);
         
-        tracing::info!("Zenoh GET: {}", key);
-
-        let replies = self.session.get(&key)
-            .await
-            .map_err(|e| DataError::Internal(e.to_string()))?;
+        let replies = self.session.get(&key).await.map_err(|e| DataError::Internal(e.to_string()))?;
 
         while let Ok(reply) = replies.recv_async().await {
-            match reply.result() {
-                Ok(sample) => {
-                    let payload = sample.payload();
-                    let body = String::from_utf8_lossy(&payload.to_bytes()).into_owned();
-                    tracing::info!("Daten empfangen: {}", body);
-
-                    let data_value: Value = serde_json::from_str(&body)
-                        .unwrap_or_else(|_| json!({ "raw_value": body }));
-
-                    return Ok(Data { data: data_value, schema: None });
-                },
-                Err(e) => {
-
-                    tracing::warn!("Zenoh Reply Fehler: {}", e);
-                }
+            if let Ok(sample) = reply.result() {
+                let body = String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned();
+                let data: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({"raw_value": body}));
+                return Ok(Data { data, schema: None });
             }
         }
-
-        tracing::warn!(" Keine Antwort von Zenoh für Key: {}", key);
-        Err(DataError::NotFound(format!("Kein Teilnehmer für {key} gefunden")))
+        Err(DataError::NotFound(key))
     }
 
     async fn write(&self, data_id: &str, value: Value) -> Result<(), DataError> {
         let zenoh_id = data_id.replace('_', "/");
         let key = format!("{}/{}", self.key_prefix, zenoh_id);
-
-        tracing::info!("Zenoh PUT: {} -> {}", key, value);
-
-        self.session.put(&key, value.to_string()).await
-            .map_err(|e| DataError::Internal(e.to_string()))?;
-
+        self.session.put(&key, value.to_string()).await.map_err(|e| DataError::Internal(e.to_string()))?;
         Ok(())
     }
 }

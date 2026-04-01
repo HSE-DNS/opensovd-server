@@ -139,9 +139,14 @@ where
         tracing::info!(target: TARGET, "CDA discovery provider enabled");
     }
 
-    // Zenoh Provider registrieren
-    // let zenoh_provider = opensovd_providers::zenoh::ZenohProvider::new().await;
-    let zenoh_provider = opensovd_providers::zenoh::ZenohProvider::new(&cli.zenoh.endpoint).await?;
+    //Zenoh Provider registration with central configuration
+    let zenoh_config = opensovd_providers::zenoh::ZenohConfig {
+        endpoint: cli.zenoh.endpoint.clone(), // Uses the IP/Port from your CLI arguments
+        discovery_selector: "**".to_string(), // Finds everything; change to "robots/**" if needed
+        robot_name_index: 0,                  // 0 = first part of path is the robot name
+    };
+
+    let zenoh_provider = opensovd_providers::zenoh::ZenohProvider::new(zenoh_config).await?;
     builder = builder.discovery(Box::new(zenoh_provider));
     tracing::info!(target: TARGET, "Zenoh discovery provider enabled");
 
