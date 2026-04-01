@@ -36,7 +36,8 @@ const VENDOR_INFO: OpenSovdInfo = OpenSovdInfo {
     name: "OpenSOVD",
 };
 
-#[tokio::main(flavor = "current_thread")]
+//#[tokio::main(flavor = "current_thread")]
+#[tokio::main(flavor = "multi_thread", worker_threads = 1)]
 #[allow(clippy::print_stderr)]
 async fn main() -> ExitCode {
     let cli = cli::Cli::parse();
@@ -137,6 +138,12 @@ where
         )));
         tracing::info!(target: TARGET, "CDA discovery provider enabled");
     }
+
+    // Zenoh Provider registrieren
+    // let zenoh_provider = opensovd_providers::zenoh::ZenohProvider::new().await;
+    let zenoh_provider = opensovd_providers::zenoh::ZenohProvider::new(&cli.zenoh.endpoint).await?;
+    builder = builder.discovery(Box::new(zenoh_provider));
+    tracing::info!(target: TARGET, "Zenoh discovery provider enabled");
 
     let cors = cors::create_cors_layer(
         &cli.cors.origins,

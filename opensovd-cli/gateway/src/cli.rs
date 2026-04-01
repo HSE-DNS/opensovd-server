@@ -61,6 +61,9 @@ pub struct Cli {
     #[command(flatten)]
     pub cda: CdaArgs,
 
+    #[command(flatten)]
+    pub zenoh: ZenohArgs,
+
     /// Enable mock entities for testing and development.
     #[arg(help_heading = "Options")]
     #[cfg(feature = "mock")]
@@ -151,4 +154,12 @@ pub struct CdaArgs {
     /// Bearer token for CDA authentication.
     #[arg(long = "cda-token", value_name = "TOKEN", env = "CDA_TOKEN", default_value = "")]
     pub token: String,
+}
+
+#[derive(Args)]
+#[command(next_help_heading = "Zenoh Options")]
+pub struct ZenohArgs {
+    /// Zenoh router endpoint to connect to.
+    #[arg(long = "zenoh-endpoint", value_name = "ENDPOINT", env = "ZENOH_ENDPOINT", default_value = "tcp/host.docker.internal:7447")]
+    pub endpoint: String,
 }
