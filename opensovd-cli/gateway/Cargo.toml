@@ -40,6 +40,8 @@ tower-http = { workspace = true, features = ["cors", "fs"] }
 tracing = { workspace = true }
 clap = { workspace = true, features = ["cargo", "derive", "env", "help", "std", "usage"] }
 opensovd-providers.workspace = true
+futures.workspace = true
+async-trait.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 sd-notify = { workspace = true }

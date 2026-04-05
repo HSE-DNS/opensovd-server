@@ -2250,8 +2250,10 @@ name = "opensovd-gateway"
 version = "0.1.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64",
  "clap",
+ "futures",
  "http",
  "libcli",
  "opensovd-core",
