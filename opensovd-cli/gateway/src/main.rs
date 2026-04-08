@@ -123,9 +123,14 @@ impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
         >,
         opensovd_core::DiscoveryError,
     > {
-        let mut streams = Vec::new();
+        let mut futures_list = Vec::new();
         for p in &self.providers {
-            match p.discover().await {
+            futures_list.push(p.discover());
+        }
+
+        let mut streams = Vec::new();
+        for res in futures::future::join_all(futures_list).await {
+            match res {
                 Ok(stream) => streams.push(stream),
                 Err(e) => tracing::error!("Provider initialization failed: {e}"),
             }
@@ -185,10 +190,8 @@ where
     builder = configure_listener(builder, &cli, authority).await?;
     builder = configure_topology(builder, &cli).await;
 
-   
     let mut discovery_list: Vec<Box<dyn opensovd_core::DiscoveryProvider>> = Vec::new();
 
-    
     if let Some(cda_host) = cli.cda.host {
         discovery_list.push(Box::new(opensovd_providers::cda::CdaProvider::new(
             cda_host,
@@ -199,7 +202,6 @@ where
         tracing::info!(target: TARGET, "CDA discovery provider added to list");
     }
 
-   
     let zenoh_config = opensovd_providers::zenoh::ZenohConfig {
         endpoint: cli.zenoh.endpoint.clone(), // Uses the IP/Port from  CLI arguments
         discovery_selector: "**".to_string(), // Finds everything; change to "robots/**" if needed
@@ -209,7 +211,6 @@ where
     let zenoh_provider = opensovd_providers::zenoh::ZenohProvider::new(zenoh_config).await?;
     discovery_list.push(Box::new(zenoh_provider));
     tracing::info!(target: TARGET, "Zenoh discovery provider added to list");
-
 
     if !discovery_list.is_empty() {
         let combined_provider = CompositeDiscoveryProvider {

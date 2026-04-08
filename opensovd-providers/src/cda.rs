@@ -21,7 +21,10 @@ impl CdaProvider {
             port,
             base_path: base_path.into(),
             token: token.into(),
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(3))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
@@ -36,7 +39,8 @@ impl CdaProvider {
     ) -> Result<(reqwest::StatusCode, String), reqwest::Error> {
         let url = format!("http://{}:{}{}", self.host, self.port, path);
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.token))
             .send()
@@ -94,7 +98,8 @@ impl opensovd_core::DataProvider for CdaDataProvider {
             self.cda_host, self.cda_port, self.base_path, self.component_id, data_id
         );
 
-        let response = match self.client
+        let response = match self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.token))
             .send()
@@ -153,7 +158,8 @@ impl opensovd_core::DataProvider for CdaDataProvider {
             "data": value
         });
 
-        let response = match self.client
+        let response = match self
+            .client
             .put(&url)
             .header("Authorization", format!("Bearer {}", self.token))
             .header("Content-Type", "application/json")
@@ -206,118 +212,139 @@ impl DiscoveryProvider for CdaProvider {
         let mut collection = opensovd_core::EntityCollection::default();
 
         let components_path = format!("{}/components", self.base_path);
-        match self.fetch_cda_path(&components_path).await {
-            Ok((status, text)) => {
-                tracing::info!(
-                    "Received REST response! Status: {status}, Length: {}",
-                    text.len()
-                );
 
-                if text.is_empty() {
-                    tracing::warn!("Response body is empty. Check the URL or CDA status.");
-                } else {
-                    match serde_json::from_str::<serde_json::Value>(&text) {
-                        Ok(json) => {
-                            tracing::info!("Successfully parsed JSON from CDA:\n{json:#?}");
-
-                            let items_array = json.get("items").and_then(|v| v.as_array()).or_else(|| json.as_array());
-                            if let Some(items) = items_array {
-                                if items.is_empty() {
-                                    tracing::info!(
-                                        "Info: The 'items' list from CDA is currently empty."
-                                    );
-                                } else {
-                                    for (index, item) in items.iter().enumerate() {
-                                        tracing::info!("- Processing item {index}: {item}");
-
-                                        let id = item
-                                            .get("id")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("unknown_id");
-                                        let name = item
-                                            .get("name")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("Unknown Component");
-
-                                        let mut cda_component = Component::new(id, name);
-                                        let mut found_data = Vec::new();
-
-                                        // Fetch available data points for the component.
-                                        let data_path =
-                                            format!("{}/components/{id}/data", self.base_path);
-                                        tracing::info!("  -> Fetching data from: {data_path}");
-                                        match self.fetch_cda_path(&data_path).await {
-                                            Ok((data_status, data_text)) => {
-                                                if data_status.is_success() && !data_text.is_empty()
-                                                {
-                                                    if let Ok(data_json) =
-                                                        serde_json::from_str::<serde_json::Value>(
-                                                            &data_text,
-                                                        )
-                                                    {
-                                                        let data_items_array = data_json.get("items")
-                                                            .and_then(|v| v.as_array())
-                                                            .or_else(|| data_json.as_array());
-
-                                                        if let Some(data_items) = data_items_array {
-                                                            for data_item in data_items {
-                                                                let data_id = data_item
-                                                                    .get("id")
-                                                                    .and_then(|v| v.as_str())
-                                                                    .unwrap_or("unknown_data");
-                                                                let data_name = data_item
-                                                                    .get("name")
-                                                                    .and_then(|v| v.as_str())
-                                                                    .unwrap_or("Unknown Data");
-
-                                                                found_data.push((
-                                                                    data_id.to_string(),
-                                                                    data_name.to_string(),
-                                                                ));
-                                                                tracing::info!(
-                                                                    "     Discovered data point: {data_id} - {data_name}"
-                                                                );
-                                                            }
-                                                        }
-                                                    } else {
-                                                        tracing::warn!(
-                                                            "     Failed to parse JSON data for {id}."
-                                                        );
-                                                    }
-                                                } else {
-                                                    tracing::info!(
-                                                        "    Info: No data found for component {id} (Status: {data_status})"
-                                                    );
-                                                }
-                                            }
-                                            Err(e) => {
-                                                tracing::error!(
-                                                    "     ERROR fetching data for {id}: {e}"
-                                                );
-                                            }
-                                        }
-
-                                        let provider = CdaDataProvider {
-                                            component_id: id.to_string(),
-                                            cda_host: self.host.clone(),
-                                            cda_port: self.port,
-                                            base_path: self.base_path.clone(),
-                                            token: self.token.clone(),
-                                            data_points: found_data,
-                                        client: self.client.clone(),
-                                        };
-                                        cda_component = cda_component.with_data_provider(provider);
-
-                                        collection.components.push(cda_component);
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => tracing::warn!("Failed to parse JSON from CDA: {e}"),
+        let mut retries: u32 = 3;
+        let mut response = None;
+        while retries > 0 {
+            match self.fetch_cda_path(&components_path).await {
+                Ok(res) => {
+                    response = Some(res);
+                    break;
+                }
+                Err(e) => {
+                    retries = retries.saturating_sub(1);
+                    tracing::warn!("Failed to connect to CDA. Retries left: {retries}. Error: {e}");
+                    if retries > 0 {
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     }
                 }
             }
-            Err(e) => tracing::error!("ERROR during REST connection: {e}"),
+        }
+
+        if let Some((status, text)) = response {
+            tracing::info!(
+                "Received REST response! Status: {status}, Length: {}",
+                text.len()
+            );
+
+            if text.is_empty() {
+                tracing::warn!("Response body is empty. Check the URL or CDA status.");
+            } else {
+                match serde_json::from_str::<serde_json::Value>(&text) {
+                    Ok(json) => {
+                        tracing::info!("Successfully parsed JSON from CDA:\n{json:#?}");
+
+                        let items_array = json
+                            .get("items")
+                            .and_then(|v| v.as_array())
+                            .or_else(|| json.as_array());
+                        if let Some(items) = items_array {
+                            if items.is_empty() {
+                                tracing::info!(
+                                    "Info: The 'items' list from CDA is currently empty."
+                                );
+                            } else {
+                                for (index, item) in items.iter().enumerate() {
+                                    tracing::info!("- Processing item {index}: {item}");
+
+                                    let id = item
+                                        .get("id")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown_id");
+                                    let name = item
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("Unknown Component");
+
+                                    let mut cda_component = Component::new(id, name);
+                                    let mut found_data = Vec::new();
+
+                                    // Fetch available data points for the component.
+                                    let data_path =
+                                        format!("{}/components/{id}/data", self.base_path);
+                                    tracing::info!("  -> Fetching data from: {data_path}");
+                                    match self.fetch_cda_path(&data_path).await {
+                                        Ok((data_status, data_text)) => {
+                                            if data_status.is_success() && !data_text.is_empty() {
+                                                if let Ok(data_json) =
+                                                    serde_json::from_str::<serde_json::Value>(
+                                                        &data_text,
+                                                    )
+                                                {
+                                                    let data_items_array = data_json
+                                                        .get("items")
+                                                        .and_then(|v| v.as_array())
+                                                        .or_else(|| data_json.as_array());
+
+                                                    if let Some(data_items) = data_items_array {
+                                                        for data_item in data_items {
+                                                            let data_id = data_item
+                                                                .get("id")
+                                                                .and_then(|v| v.as_str())
+                                                                .unwrap_or("unknown_data");
+                                                            let data_name = data_item
+                                                                .get("name")
+                                                                .and_then(|v| v.as_str())
+                                                                .unwrap_or("Unknown Data");
+
+                                                            found_data.push((
+                                                                data_id.to_string(),
+                                                                data_name.to_string(),
+                                                            ));
+                                                            tracing::info!(
+                                                                "     Discovered data point: {data_id} - {data_name}"
+                                                            );
+                                                        }
+                                                    }
+                                                } else {
+                                                    tracing::warn!(
+                                                        "     Failed to parse JSON data for {id}."
+                                                    );
+                                                }
+                                            } else {
+                                                tracing::info!(
+                                                    "    Info: No data found for component {id} (Status: {data_status})"
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "     ERROR fetching data for {id}: {e}"
+                                            );
+                                        }
+                                    }
+
+                                    let provider = CdaDataProvider {
+                                        component_id: id.to_string(),
+                                        cda_host: self.host.clone(),
+                                        cda_port: self.port,
+                                        base_path: self.base_path.clone(),
+                                        token: self.token.clone(),
+                                        data_points: found_data,
+                                        client: self.client.clone(),
+                                    };
+                                    cda_component = cda_component.with_data_provider(provider);
+
+                                    collection.components.push(cda_component);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => tracing::warn!("Failed to parse JSON from CDA: {e}"),
+                }
+            }
+        } else {
+            tracing::error!("ERROR: Could not fetch CDA components after multiple retries.");
         }
 
         let stream = futures::stream::once(std::future::ready(Ok((vec![], collection))));
