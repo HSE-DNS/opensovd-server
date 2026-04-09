@@ -5,9 +5,13 @@ meta {
 }
 
 get {
-  url: http://localhost:7690/sovd/v1/components
+  url: {{versioned_url}}/components
   body: none
   auth: inherit
+}
+
+assert {
+  res.status: eq 200
 }
 
 settings {
