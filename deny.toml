@@ -7,6 +7,7 @@
 [graph]
 targets = [
     "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu", #added arm target build
     "x86_64-pc-windows-msvc",
     "aarch64-apple-darwin",
 ]
@@ -26,6 +27,8 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "Unicode-3.0",
+    "ISC",
+    "OpenSSL"
 ]
 confidence-threshold = 0.93
 
