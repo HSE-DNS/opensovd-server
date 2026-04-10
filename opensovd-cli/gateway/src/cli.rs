@@ -141,14 +141,29 @@ pub struct CdaArgs {
     pub host: Option<String>,
 
     /// Port of the CDA server.
-    #[arg(long = "cda-port", value_name = "PORT", env = "CDA_PORT", default_value = "20002")]
+    #[arg(
+        long = "cda-port",
+        value_name = "PORT",
+        env = "CDA_PORT",
+        default_value = "20002"
+    )]
     pub port: u16,
 
     /// Base path for the CDA REST API.
-    #[arg(long = "cda-base-path", value_name = "PATH", env = "CDA_BASE_PATH", default_value = "/vehicle/v15")]
+    #[arg(
+        long = "cda-base-path",
+        value_name = "PATH",
+        env = "CDA_BASE_PATH",
+        default_value = "/vehicle/v15"
+    )]
     pub base_path: String,
 
     /// Bearer token for CDA authentication.
-    #[arg(long = "cda-token", value_name = "TOKEN", env = "CDA_TOKEN", default_value = "")]
+    #[arg(
+        long = "cda-token",
+        value_name = "TOKEN",
+        env = "CDA_TOKEN",
+        default_value = ""
+    )]
     pub token: String,
 }
