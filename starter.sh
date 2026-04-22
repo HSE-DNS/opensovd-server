@@ -5,6 +5,14 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 CDA_DIR="../classic-diagnostic-adapter"
 PID_FILE="$SCRIPT_DIR/.sovd-gateway.pid"
 
+check_dependencies() {
+    if [ ! jq --version &> /dev/null ]; then
+        echo "jq is not installed"
+        echo "please install package jq with: sudo apt install jq"
+        exit 1
+    fi
+}
+
 
 start() {
     # in das testcontainer Verzeichnis des CDA wechseln 
@@ -12,7 +20,7 @@ start() {
 
     # Testcontainer starten
     echo "starting CDA testcontainer..."
-    docker-compose up -d
+    docker compose up -d
     sleep 20 
 
     # Token holen
@@ -37,17 +45,18 @@ stop() {
 
     echo "stopping CDA testcontainer..."
     cd $SCRIPT_DIR/$CDA_DIR/testcontainer
-    docker-compose down
+    docker compose down
     echo "CDA testcontainer shut down successfully"
 }
 
 status() {
     cd $SCRIPT_DIR/$CDA_DIR/testcontainer
-    docker-compose ps
+    docker compose ps
 }
 
 case "$1" in 
     start)
+       check_dependencies
        start
        ;;
     stop)
