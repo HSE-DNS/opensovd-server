@@ -3,6 +3,13 @@ SPDX-FileCopyrightText: Copyright (c) 2026 Contributors to the Eclipse Foundatio
 SPDX-License-Identifier: Apache-2.0
 -->
 
+# NOTE
+This is a MODIFIED VERSION of the [eclipse-opensovd/opensovd-core](https://github.com/eclipse-opensovd/opensovd-core/tree/inc/liebherr) repository.
+
+The instruction for the SDV HackFest is located in [hackfest_instruction.en.md](docs/hackfest_instruction.en.md).
+
+
+
 # OpenSOVD Core
 
 > Standardized diagnostic communication for connected vehicles.

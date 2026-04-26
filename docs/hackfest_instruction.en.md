@@ -1,4 +1,15 @@
-# Setup Guide for CDA and SOVD on Raspberry Pi
+> 🇩🇪 [Auf Deutsch lesen](hackfest_anleitung.de.md) | 🇬🇧 **English**
+
+# Setup Guide: CDA and SOVD on the Raspberry Pi
+
+## Table of Contents
+- [Introduction](#introduction)
+  - [Repositories](#repositories)
+  - [Packages](#packages)
+- [Setup via Starter Script](#setup-via-starter-script)
+- [Preparing the CDA](#preparing-the-cda)
+- [Preparing the SOVD Server](#preparing-the-sovd-server)
+- [Flashing the S32K148 Board](#flashing-the-s32k148-board)
 
 ## Introduction
 
@@ -43,8 +54,8 @@ The setup was tested with the following versions:
 | jq         | 1.7            |
 
 
-## Setup
-If the CDA test containers are already built, the starter.sh script from this repository can be used.
+## Setup via Starter Script
+If the CDA test containers are already built, the [starter.sh](../starter.sh) script from this repository can be used.
 ATTENTION: Under certain circumstances, the script may need to be made executable with the command: `chmod +x starter.sh`
  
 The script can be started with the following parameters:
@@ -53,12 +64,11 @@ The script can be started with the following parameters:
 - `stop`: stops the SOVD server and shuts down the CDA test containers
 - `status`: shows the status of the CDA test containers
 
-## CDA Preparation
+## Preparing the CDA
 
-Info: A detailed description of the CDA and the CDA provider can be found in the [docs/](docs/) directory.
+Info: A detailed description of the CDA and the CDA provider can be found in the [docs/](../docs/) directory.
 
 In order for the test container to run on the Raspberry Pi, the corresponding containers must be built for arm64. This can be done either directly on the Raspberry Pi or on x86 devices via emulation.
-(Alternatively, the images might also be pulled from the Eclipse repository?) 
 Further information can be found in the README of the CDA repository.
 
 a) ARM devices (MAC or Pi):
@@ -70,7 +80,7 @@ cd testcontainer && docker compose build
 
 b) x86 devices
 
-For cross-compiling on x86, the QEMU emulators must be installed. This is done with the command
+For cross-compiling on x86, the QEMU emulators may have to be installed additionally. This is done with the command
 ```sh
 docker run --privileged --rm tonistiigi/binfmt --install all
 ```
@@ -80,7 +90,7 @@ Afterwards, the build can be started in the `testcontainer` directory with
 ```sh
 DOCKER_DEFAULT_PLATFORM=linux/arm64 docker compose build
 ```
-Note: The `docker buildx build` command used in the Docker documentation linked above can only be used to build a single image, but not for a `docker compose` command.
+Note: The `docker buildx build` command used in the Docker documentation linked above can only be used to build a **single** image, but **not** for a `docker compose` command.
 
 If PowerShell is used instead of a Linux environment, the command changes to
 ```sh
@@ -90,6 +100,8 @@ $env:DOCKER_DEFAULT_PLATFORM="linux/arm64"; docker compose build
 After building, the images must be transferred to the Pi. This can be done, for example, by:
 ```sh
 docker save -o pi-testcontainer.tar testcontainer-ecu-sim-arm64:latest testcontainer-cda:latest # creates an archive with the images
+```
+```sh
 scp pi-testcontainer.tar <username>@<Pi_IP>:/home/<username>/workspace/ # or any other directory
 ```
 
@@ -98,8 +110,6 @@ On the Pi itself, these images must then be imported, assumed here to be in the 
 cd /home/<username>/workspace/
 docker load -i pi-testcontainer.tar
 ```
-
-Alternatively, the images can also be pulled from the Eclipse repository.
 
 Note: If the provided or built images do not have the default names `testcontainer-ecu-sim:latest` and `testcontainer-cda:latest`, the image name must be specified for the respective job in the `docker-compose.yml` of the CDA `testcontainer` directory, otherwise the images will not be found and consequently rebuilt, which may take a long time. 
 
@@ -141,7 +151,7 @@ To shut down, use the command
 docker compose down
 ```
 
-## SOVD Preparation
+## Preparing the SOVD Server
 If the starter.sh script is not used, the SOVD server can also be built manually. This can be done using the command
 ```sh
 cargo build -p opensovd-gateway
@@ -168,9 +178,9 @@ When starting the SOVD server, parameters that deviate from the default values c
 
 or, as seen above for example with the `CDA_TOKEN`, via an environment variable. 
 
-Further information can be found, as already mentioned, in [cda.md](docs/cda.md) and [cdaProvider.md](docs/cdaProvider.md). 
+Further information can be found, as already mentioned, in [cda.md](cda.md) and [cdaProvider.md](cdaProvider.md). 
 
-# Flashing the S32K148 Board
+## Flashing the S32K148 Board
 For flashing the S32K148 board, please use the provided documentary: https://eclipse-openbsw.github.io/openbsw/sphinx_docs/doc/dev/learning/setup/index.html
 
 NOTE: 
@@ -180,8 +190,8 @@ NOTE:
     cmake --preset s32k148-gcc
     cmake --build --preset s32k148-gcc
     ```
-    However, this target does no longer exist.
-    Therefore, for the boards used at the SDV HackFest, the correct target/commands should be:
+    for CMake target builds. However, this target does no longer exist.
+    Instead, for the boards used at the SDV HackFest, the correct target/commands should be:
     ```sh
     cmake --preset s32k148-freertos-gcc
     ```
