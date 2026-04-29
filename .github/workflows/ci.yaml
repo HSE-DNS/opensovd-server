@@ -26,6 +26,8 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
       release: ${{ steps.check.outputs.release }}
@@ -216,7 +218,8 @@ jobs:
 
   pages:
     needs: [prepare, build, coverage]
-    if: needs.prepare.outputs.should_run == 'true' && github.ref == 'refs/heads/main'
+    # Disabled until GitHub Pages is enabled on the repository.
+    if: false
     runs-on: ubuntu-24.04
     permissions:
       pages: write
@@ -405,6 +408,7 @@ jobs:
     needs: [prepare, build, licenses, advisories, lint, coverage, pages, docker, release]
     if: always()
     runs-on: ubuntu-24.04
+    permissions: {}
     steps:
       - run: |
           if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
