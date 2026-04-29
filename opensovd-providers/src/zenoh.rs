@@ -20,6 +20,8 @@ pub struct ZenohConfig {  //opensovd-cli/src/main.rs
     /// Defines which part of the Zenoh path is the Robot Name.
     /// Index 0 means the first part (e.g., "RobotA/sensor" -> "RobotA")
     pub robot_name_index: usize,
+    /// The category name to assign to the discovered data.
+    pub category: String,
 }
 
 impl Default for ZenohConfig {
@@ -28,6 +30,7 @@ impl Default for ZenohConfig {
             endpoint: "tcp/localhost:7447".to_string(),
             discovery_selector: "**".to_string(),
             robot_name_index: 0,
+            category: "zenoh-telemetry".to_string(),
         }
     }
 }
@@ -107,6 +110,7 @@ impl DiscoveryProvider for ZenohProvider {
                 session: self.session.clone(),
                 robot_name: robot_name.clone(),
                 data_points: data_ids.into_iter().collect(),
+                category: self.config.category.clone(),
             });
             collection.components.push(component);
         }
@@ -121,6 +125,7 @@ pub struct ZenohDataProvider {
     session: Session,
     robot_name: String,
     data_points: Vec<String>,
+    category: String,
 }
 
 #[async_trait]
@@ -129,7 +134,7 @@ impl DataProvider for ZenohDataProvider {
         let mut metadata = vec![Metadata {
             id: "telemetry".to_string(),
             name: format!("{} All Telemetry", self.robot_name),
-            category: "Zenoh-Telemetry".to_string(),
+            category: self.category.clone(),
             is_readable: true,
             is_writable: false,
             translation_id: None,
@@ -142,8 +147,8 @@ impl DataProvider for ZenohDataProvider {
             if id.is_empty() { continue; }
             metadata.push(Metadata {
                 id: id.clone(),
-                name: id.replace('_', " "),
-                category: "Zenoh-Telemetry".to_string(),
+                name: format!("{} {}", self.robot_name, id.replace('_', " ")),
+                category: self.category.clone(),
                 is_readable: true,
                 is_writable: false,
                 translation_id: None,
@@ -157,6 +162,12 @@ impl DataProvider for ZenohDataProvider {
     }
 
     async fn read(&self, data_id: &str, _include_schema: bool) -> Result<Data, DataError> {
+        let item_name = if data_id == "telemetry" {
+            format!("{} All Telemetry", self.robot_name)
+        } else {
+            format!("{} {}", self.robot_name, data_id.replace('_', " "))
+        };
+
         let key = if data_id == "telemetry" {
             format!("{}/**", self.robot_name)
         } else if self.data_points.contains(&data_id.to_string()) {
@@ -191,8 +202,8 @@ impl DataProvider for ZenohDataProvider {
         }
 
         let payload = json!({
-            "name": self.robot_name,
-            "category": "Zenoh-Telemetry",
+            "name": item_name,
+            "category": self.category,
             "data": data_map
         });
 
