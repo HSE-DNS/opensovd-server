@@ -5,7 +5,7 @@ use opensovd_core::{
     EntityCollection, EntityRef, Metadata,
 };
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use zenoh::Session;
 
@@ -81,7 +81,7 @@ impl DiscoveryProvider for ZenohProvider {
             .await
             .map_err(|e| DiscoveryError::Other(e.to_string().into()))?;
 
-        let mut robot_map: HashMap<String, Vec<(String, String)>> = HashMap::new();
+        let mut robot_map: HashMap<String, HashSet<String>> = HashMap::new();
 
         while let Ok(reply) = replies.recv_async().await {
             if let Ok(sample) = reply.result() {
@@ -90,34 +90,23 @@ impl DiscoveryProvider for ZenohProvider {
                 
                 // Determine the robot name based on the index in the config
                 if let Some(robot_name) = parts.get(self.config.robot_name_index) {
-                    let robot_name_str = robot_name.to_string();
+                    let prefix = format!("{}/", robot_name);
+                    let relative_key = key.strip_prefix(&prefix).unwrap_or(key);
+                    let data_id = relative_key.replace('/', "_");
                     
-                    // Filter out the robot name part to build the Data ID
-                    let data_parts: Vec<&str> = parts.iter()
-                        .enumerate()
-                        .filter(|&(i, _)| i != self.config.robot_name_index)
-                        .map(|(_, &s)| s)
-                        .collect();
-                    
-                    let data_id = data_parts.join("_");
-                    
-                    if !data_id.is_empty() {
-                        robot_map.entry(robot_name_str)
-                            .or_default()
-                            .push((data_id.clone(), data_id));
-                    }
+                    robot_map.entry(robot_name.to_string()).or_default().insert(data_id);
                 }
             }
         }
 
-        for (robot_name, points) in robot_map {
-            tracing::info!("Component created: '{}' with {} items", robot_name, points.len());
+        for (robot_name, data_ids) in robot_map {
+            tracing::info!("Component created: '{}'", robot_name);
             let mut component = Component::new(robot_name.clone(), format!("Zenoh Robot {robot_name}"));
             
             component = component.with_data_provider(ZenohDataProvider {
                 session: self.session.clone(),
-                key_prefix: robot_name,
-                data_points: points,
+                robot_name: robot_name.clone(),
+                data_points: data_ids.into_iter().collect(),
             });
             collection.components.push(component);
         }
@@ -130,46 +119,87 @@ impl DiscoveryProvider for ZenohProvider {
 
 pub struct ZenohDataProvider {
     session: Session,
-    key_prefix: String,
-    data_points: Vec<(String, String)>,
+    robot_name: String,
+    data_points: Vec<String>,
 }
 
 #[async_trait]
 impl DataProvider for ZenohDataProvider {
     async fn list(&self, _filter: DataFilter) -> Result<Vec<Metadata>, DataError> {
-        Ok(self.data_points.iter().map(|(id, name)| Metadata {
-            id: id.clone(),
-            name: name.clone(),
-            category: "zenoh-telemetry".to_string(),
+        let mut metadata = vec![Metadata {
+            id: "telemetry".to_string(),
+            name: format!("{} All Telemetry", self.robot_name),
+            category: "Zenoh-Telemetry".to_string(),
             is_readable: true,
-            is_writable: true,
+            is_writable: false,
             translation_id: None,
             groups: vec![],
             tags: vec![],
             schema: None,
-        }).collect())
+        }];
+
+        for id in &self.data_points {
+            if id.is_empty() { continue; }
+            metadata.push(Metadata {
+                id: id.clone(),
+                name: id.replace('_', " "),
+                category: "Zenoh-Telemetry".to_string(),
+                is_readable: true,
+                is_writable: false,
+                translation_id: None,
+                groups: vec![],
+                tags: vec![],
+                schema: None,
+            });
+        }
+
+        Ok(metadata)
     }
 
     async fn read(&self, data_id: &str, _include_schema: bool) -> Result<Data, DataError> {
-        let zenoh_id = data_id.replace('_', "/");
-        let key = format!("{}/{}", self.key_prefix, zenoh_id);
+        let key = if data_id == "telemetry" {
+            format!("{}/**", self.robot_name)
+        } else if self.data_points.contains(&data_id.to_string()) {
+            let zenoh_path = data_id.replace('_', "/");
+            format!("{}/{}", self.robot_name, zenoh_path)
+        } else {
+            return Err(DataError::NotFound(data_id.to_string()));
+        };
         
         let replies = self.session.get(&key).await.map_err(|e| DataError::Internal(e.to_string()))?;
 
+        let mut data_map = serde_json::Map::new();
+        let mut found_any = false;
+
         while let Ok(reply) = replies.recv_async().await {
             if let Ok(sample) = reply.result() {
+                found_any = true;
+                let full_key = sample.key_expr().as_str();
+                let prefix = format!("{}/", self.robot_name);
+                let relative_key = full_key.strip_prefix(&prefix).unwrap_or(full_key);
+                
                 let body = String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned();
-                let data: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({"raw_value": body}));
-                return Ok(Data { data, schema: None });
+                let val: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!(body));
+                
+                let json_key = relative_key.replace('/', "_");
+                data_map.insert(json_key, val);
             }
         }
-        Err(DataError::NotFound(key))
+
+        if !found_any && data_id != "telemetry" {
+            return Err(DataError::NotFound(format!("No data found for {data_id} in Zenoh")));
+        }
+
+        let payload = json!({
+            "name": self.robot_name,
+            "category": "Zenoh-Telemetry",
+            "data": data_map
+        });
+
+        Ok(Data { data: payload, schema: None })
     }
 
-    async fn write(&self, data_id: &str, value: Value) -> Result<(), DataError> {
-        let zenoh_id = data_id.replace('_', "/");
-        let key = format!("{}/{}", self.key_prefix, zenoh_id);
-        self.session.put(&key, value.to_string()).await.map_err(|e| DataError::Internal(e.to_string()))?;
-        Ok(())
+    async fn write(&self, _data_id: &str, _value: Value) -> Result<(), DataError> {
+        Err(DataError::Internal("Writing to aggregated telemetry is not supported directly".to_string()))
     }
 }
