@@ -102,7 +102,8 @@ struct CompositeDiscoveryProvider {
     providers: Vec<Box<dyn opensovd_core::DiscoveryProvider>>,
 }
 
-#[async_trait::async_trait]
+// FIX: Wir nutzen hier explizit das Makro aus opensovd_core, um Compiler-Fehler zu vermeiden!
+#[opensovd_core::async_trait]
 impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
     async fn discover(
         &self,
@@ -136,7 +137,7 @@ impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
             }
         }
 
-        //Combines provider responses into stream/logs errors.
+        // Combines provider responses into stream/logs errors.
         let combined = futures::stream::select_all(streams).map(|result| {
             match &result {
                 Ok((_, collection)) => {
@@ -203,7 +204,7 @@ where
     }
 
     let zenoh_config = opensovd_providers::zenoh::ZenohConfig {
-        endpoint: cli.zenoh.endpoint.clone(), // Uses the IP/Port from  CLI arguments
+        endpoint: cli.zenoh.endpoint.clone(), // Uses the IP/Port from CLI arguments
         discovery_selector: "**".to_string(), // Finds everything; change to "robots/**" if needed
         robot_name_index: 0,                  // 0 = first part of path is the robot name
     };
