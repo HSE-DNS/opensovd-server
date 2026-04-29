@@ -201,11 +201,16 @@ impl DataProvider for ZenohDataProvider {
             return Err(DataError::NotFound(format!("No data found for {data_id} in Zenoh")));
         }
 
-        let payload = json!({
-            "name": item_name,
-            "category": self.category,
-            "data": data_map
-        });
+        let payload = if data_id == "telemetry" {
+            json!({
+                "name": self.robot_name,
+                "category": "Zenoh-Telemetry",
+                "data": data_map
+            })
+        } else {
+            // Bei einer spezifischen ID geben wir nur deren konkreten Wert zurück
+            data_map.get(data_id).cloned().unwrap_or_else(|| json!(data_map))
+        };
 
         Ok(Data { data: payload, schema: None })
     }
