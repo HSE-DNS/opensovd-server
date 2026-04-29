@@ -162,12 +162,6 @@ impl DataProvider for ZenohDataProvider {
     }
 
     async fn read(&self, data_id: &str, _include_schema: bool) -> Result<Data, DataError> {
-        let item_name = if data_id == "telemetry" {
-            format!("{} All Telemetry", self.robot_name)
-        } else {
-            format!("{} {}", self.robot_name, data_id.replace('_', " "))
-        };
-
         let key = if data_id == "telemetry" {
             format!("{}/**", self.robot_name)
         } else if self.data_points.contains(&data_id.to_string()) {

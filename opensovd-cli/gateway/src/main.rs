@@ -206,6 +206,7 @@ where
         endpoint: cli.zenoh.endpoint.clone(), // Uses the IP/Port from  CLI arguments
         discovery_selector: "**".to_string(), // Finds everything; change to "robots/**" if needed
         robot_name_index: 0,                  // 0 = first part of path is the robot name
+        category: "Zenoh-Telemetry".to_string(),
     };
 
     let zenoh_provider = opensovd_providers::zenoh::ZenohProvider::new(zenoh_config).await?;
