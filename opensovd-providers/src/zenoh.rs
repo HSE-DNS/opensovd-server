@@ -238,3 +238,56 @@ impl DataProvider for ZenohDataProvider {
         ))
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use opensovd_core::{DataFilter, DataProvider};
+    use serde_json::json;
+
+    #[test]
+    fn test_zenoh_config_default() {
+        let config = ZenohConfig::default();
+        assert_eq!(config.endpoint, "tcp/localhost:7447");
+        assert_eq!(config.discovery_selector, "**");
+        assert_eq!(config.robot_name_index, 0);
+        assert_eq!(config.category, "currentData");
+    }
+
+    #[tokio::test]
+    async fn test_zenoh_provider_list_metadata() {
+        let config = zenoh::Config::default(); // Lokaler, temporärer Peer-Modus für Tests
+        let session = zenoh::open(config).await.unwrap();
+        
+        let provider = ZenohDataProvider {
+            session,
+            robot_name: "TestRobot".to_string(),
+            data_points: vec![DataPointMeta {
+                id: "speed_sensor".to_string(),
+                name: "Speed Sensor".to_string(),
+                category: "sensorData".to_string(),
+            }],
+            fallback_category: "currentData".to_string(),
+        };
+
+        let metadata = provider.list(DataFilter::default()).await.unwrap();
+        
+        // expecting 2 entries (telemetry + speed_sensor)
+        assert_eq!(metadata.len(), 2);
+        assert_eq!(metadata[0].id, "telemetry");
+        assert_eq!(metadata[1].id, "speed_sensor");
+        assert_eq!(metadata[1].category, "sensorData");
+    }
+
+    #[tokio::test]
+    async fn test_zenoh_provider_write_fails() {
+        let config = zenoh::Config::default();
+        let session = zenoh::open(config).await.unwrap();
+        let provider = ZenohDataProvider { session, robot_name: "R1".to_string(), data_points: vec![], fallback_category: "".to_string() };
+
+        let result = provider.write("any_id", json!("some_value")).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not supported"));
+    }
+}

@@ -177,3 +177,47 @@ impl DataProvider for ZenohDataProvider {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use opensovd_core::{DataFilter, DataProvider};
+    use serde_json::json;
+
+    #[test]
+    fn test_zenoh_pubsub_config_default() {
+        let config = ZenohConfig::default();
+        assert_eq!(config.endpoint, "tcp/localhost:7447");
+        assert_eq!(config.discovery_selector, "**");
+        assert_eq!(config.robot_name_index, 0);
+    }
+
+    #[tokio::test]
+    async fn test_zenoh_pubsub_provider_list_metadata() {
+        let config = zenoh::Config::default();
+        let session = zenoh::open(config).await.unwrap();
+        
+        let provider = ZenohDataProvider {
+            session,
+            key_prefix: "TestRobot".to_string(),
+            data_points: vec![("sensor_1".to_string(), "Sensor 1".to_string())],
+        };
+
+        let metadata = provider.list(DataFilter::default()).await.unwrap();
+        assert_eq!(metadata.len(), 1);
+        assert_eq!(metadata[0].id, "sensor_1");
+        assert!(metadata[0].is_writable);
+        assert!(metadata[0].is_readable);
+    }
+
+    #[tokio::test]
+    async fn test_zenoh_pubsub_provider_write_success() {
+        let config = zenoh::Config::default();
+        let session = zenoh::open(config).await.unwrap();
+        let provider = ZenohDataProvider { session, key_prefix: "R2".to_string(), data_points: vec![] };
+
+        let result = provider.write("sensor_1", json!({"val": 42})).await;
+        assert!(result.is_ok()); // simple Publish should pass w/o errors
+    }
+}
