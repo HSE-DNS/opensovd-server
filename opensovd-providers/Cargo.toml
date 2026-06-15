@@ -30,6 +30,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+wiremock = "0.6"
+url = "2.5"
 
 [lints]
 workspace = true
