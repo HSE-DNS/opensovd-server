@@ -102,8 +102,8 @@ struct CompositeDiscoveryProvider {
     providers: Vec<Box<dyn opensovd_core::DiscoveryProvider>>,
 }
 
-// FIX: Wir nutzen hier explizit das Makro aus opensovd_core, um Compiler-Fehler zu vermeiden!
-#[opensovd_core::async_trait]
+// FIX: Wir nutzen direkt das Original-Makro!
+#[async_trait::async_trait]
 impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
     async fn discover(
         &self,
