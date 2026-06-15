@@ -324,3 +324,106 @@ impl DiscoveryProvider for CdaProvider {
         Ok(Box::pin(stream))
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use opensovd_core::DataProvider;
+    use serde_json::json;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_cda_provider_fetch_path() {
+        // 1. Start a local mock server
+        let mock_server = MockServer::start().await;
+
+        // 2. Configure expected behavior of the "CDA server"
+        Mock::given(method("GET"))
+            .and(path("/vehicle/v15/components"))
+            .and(header("Authorization", "Bearer my-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{\"status\":\"ok\"}"))
+            .mount(&mock_server)
+            .await;
+
+        // Parse host and port dynamically from the mock server
+        let uri = mock_server.uri();
+        let url = url::Url::parse(&uri).unwrap();
+        let host = url.host_str().unwrap().to_string();
+        let port = url.port().unwrap();
+
+        // 3. Initialize the real provider with the mock data
+        let provider = CdaProvider::new(host, port, "/vehicle/v15", "my-token");
+        let (status, body) = provider.fetch_cda_path("/vehicle/v15/components").await.unwrap();
+
+        // 4. Verify the results
+        assert!(status.is_success());
+        assert_eq!(body, "{\"status\":\"ok\"}");
+    }
+
+    #[tokio::test]
+    async fn test_cda_data_provider_read_success() {
+        let mock_server = MockServer::start().await;
+
+        // The real CDA server often delivers values wrapped in a "data" object
+        let mock_response = json!({
+            "data": { "vin": "WBA0000000000" }
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/vehicle/v15/components/flxc1000/data/VINDataIdentifier"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_response))
+            .mount(&mock_server)
+            .await;
+
+        let uri = mock_server.uri();
+        let url = url::Url::parse(&uri).unwrap();
+        
+        let provider = CdaDataProvider {
+            component_id: "flxc1000".to_string(),
+            cda_host: url.host_str().unwrap().to_string(),
+            cda_port: url.port().unwrap(),
+            base_path: "/vehicle/v15".to_string(),
+            token: "test-token".to_string(),
+            data_points: vec![],
+            client: reqwest::Client::new(),
+        };
+
+        let result = provider.read("VINDataIdentifier", false).await.unwrap();
+        
+        // Check if our logic successfully removed the outer "data" field
+        assert_eq!(result.data, json!({ "vin": "WBA0000000000" }));
+    }
+
+    #[tokio::test]
+    async fn test_cda_data_provider_write() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("PUT"))
+            .and(path("/vehicle/v15/components/flxc1000/data/SomeIdentifier"))
+            .and(header("Authorization", "Bearer test-token"))
+            .and(header("Content-Type", "application/json"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let uri = mock_server.uri();
+        let url = url::Url::parse(&uri).unwrap();
+        
+        let provider = CdaDataProvider {
+            component_id: "flxc1000".to_string(),
+            cda_host: url.host_str().unwrap().to_string(),
+            cda_port: url.port().unwrap(),
+            base_path: "/vehicle/v15".to_string(),
+            token: "test-token".to_string(),
+            data_points: vec![],
+            client: reqwest::Client::new(),
+        };
+
+        // Call the `write` method
+        let result = provider.write("SomeIdentifier", json!("new_value")).await;
+        assert!(result.is_ok());
+    }
+}
