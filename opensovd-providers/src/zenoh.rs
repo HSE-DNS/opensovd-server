@@ -255,7 +255,7 @@ mod tests {
         assert_eq!(config.category, "currentData");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_zenoh_provider_list_metadata() {
         let config = zenoh::Config::default(); // Lokaler, temporärer Peer-Modus für Tests
         let session = zenoh::open(config).await.unwrap();
@@ -280,7 +280,7 @@ mod tests {
         assert_eq!(metadata[1].category, "sensorData");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_zenoh_provider_write_fails() {
         let config = zenoh::Config::default();
         let session = zenoh::open(config).await.unwrap();

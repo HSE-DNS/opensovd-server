@@ -193,7 +193,7 @@ mod tests {
         assert_eq!(config.robot_name_index, 0);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_zenoh_pubsub_provider_list_metadata() {
         let config = zenoh::Config::default();
         let session = zenoh::open(config).await.unwrap();
@@ -211,7 +211,7 @@ mod tests {
         assert!(metadata[0].is_readable);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_zenoh_pubsub_provider_write_success() {
         let config = zenoh::Config::default();
         let session = zenoh::open(config).await.unwrap();
