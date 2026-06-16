@@ -152,7 +152,6 @@ impl DataProvider for ZenohDataProvider {
 
         tracing::debug!("SOVD Read: Waiting for publication for {}", key);
 
-        // Timeout after 5 seconds
         match timeout(Duration::from_secs(5), subscriber.recv_async()).await {
             Ok(Ok(sample)) => {
                 let body = String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned();

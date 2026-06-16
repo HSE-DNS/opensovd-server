@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use zenoh::Session;
 
-pub struct ZenohConfig {  //opensovd-cli/src/main.rs
-    /// The network address of the Zenoh Router (e.g., "127.0.0.1:7447" or "192.168.1.50:7447")
+pub struct ZenohConfig {
+    /// The network address of the Zenoh Router
     pub endpoint: String,
     /// The Zenoh selector used to find robots.
     /// Use "**" for everything or "robots/**" to filter for specific prefixes.
@@ -257,7 +257,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_zenoh_provider_list_metadata() {
-        let config = zenoh::Config::default(); // Lokaler, temporärer Peer-Modus für Tests
+        let config = zenoh::Config::default(); 
         let session = zenoh::open(config).await.unwrap();
         
         let provider = ZenohDataProvider {

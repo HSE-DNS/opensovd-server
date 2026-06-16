@@ -102,7 +102,7 @@ struct CompositeDiscoveryProvider {
     providers: Vec<Box<dyn opensovd_core::DiscoveryProvider>>,
 }
 
-// FIX: Wir nutzen direkt das Original-Makro!
+
 #[async_trait::async_trait]
 impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
     async fn discover(
@@ -147,7 +147,7 @@ impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
                     );
                 }
                 Err(e) => {
-                    tracing::error!("Discovery stream error (CDA/Zenoh): {e}");
+                    tracing::error!("Discovery stream error (Zenoh): {e}");
                 }
             }
             result
@@ -192,16 +192,6 @@ where
     builder = configure_topology(builder, &cli).await;
 
     let mut discovery_list: Vec<Box<dyn opensovd_core::DiscoveryProvider>> = Vec::new();
-
-    if let Some(cda_host) = cli.cda.host {
-        discovery_list.push(Box::new(opensovd_providers::cda::CdaProvider::new(
-            cda_host,
-            cli.cda.port,
-            cli.cda.base_path,
-            cli.cda.token,
-        )));
-        tracing::info!(target: TARGET, "CDA discovery provider added to list");
-    }
 
     let zenoh_config = opensovd_providers::zenoh::ZenohConfig {
         endpoint: cli.zenoh.endpoint.clone(), // Uses the IP/Port from CLI arguments

@@ -59,9 +59,6 @@ pub struct Cli {
     pub auth: AuthArgs,
 
     #[command(flatten)]
-    pub cda: CdaArgs,
-
-    #[command(flatten)]
     pub zenoh: ZenohArgs,
 
     /// Enable mock entities for testing and development.
@@ -134,26 +131,6 @@ pub struct AuthArgs {
     /// JSON data file for Rego policies.
     #[arg(long = "auth-policy-data", value_name = "FILE")]
     pub policy_data: Vec<PathBuf>,
-}
-
-#[derive(Args)]
-#[command(next_help_heading = "CDA Options")]
-pub struct CdaArgs {
-    /// Hostname or IP of the CDA server. If set, CDA integration is enabled.
-    #[arg(long = "cda-host", value_name = "HOST", env = "CDA_HOST")]
-    pub host: Option<String>,
-
-    /// Port of the CDA server.
-    #[arg(long = "cda-port", value_name = "PORT", env = "CDA_PORT", default_value = "20002")]
-    pub port: u16,
-
-    /// Base path for the CDA REST API.
-    #[arg(long = "cda-base-path", value_name = "PATH", env = "CDA_BASE_PATH", default_value = "/vehicle/v15")]
-    pub base_path: String,
-
-    /// Bearer token for CDA authentication.
-    #[arg(long = "cda-token", value_name = "TOKEN", env = "CDA_TOKEN", default_value = "")]
-    pub token: String,
 }
 
 #[derive(Args)]
