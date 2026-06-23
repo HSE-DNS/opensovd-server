@@ -1,7 +1,8 @@
+
 {
   "name": "OpenSOVD Core",
   "image": "mcr.microsoft.com/devcontainers/rust:1-1-bookworm",
-  //"overrideCommand": false,
+  "overrideCommand": false,
   "remoteUser": "vscode",
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker": {},
@@ -37,8 +38,6 @@
       }
     }
   },
-  "forwardPorts": [
-    7690
-  ],
+  "forwardPorts": [7690],
   "postCreateCommand": "uv sync"
 }

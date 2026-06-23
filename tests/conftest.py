@@ -3,15 +3,16 @@
 
 """Pytest configuration and fixtures for end2end tests."""
 
+import os
+import re
 import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
-from fixtures import Gateway, default_gateway_args, spawn_gateway
+from fixtures import default_binary_args
 
-# Re-export for other modules
-__all__ = ["Gateway", "default_gateway_args", "spawn_gateway"]
-
+PROJECT_ROOT = Path(__file__).parent.parent
 
 # --- Session metadata (shown in HTML report header) ---
 
@@ -23,26 +24,28 @@ def pytest_configure(config):
     """Store config for later access in other hooks."""
     global _config
     _config = config
+    if config.getoption("--opensovd-run"):
+        for flag in ("--opensovd-profile", "--opensovd-target", "--opensovd-features"):
+            if config.getoption(flag):
+                raise pytest.UsageError(f"{flag} has no effect when --opensovd-run is set")
+    if config.getoption("--opensovd-coverage"):
+        _setup_coverage(config)
 
 
 @pytest.hookimpl(optionalhook=True)
-def pytest_metadata(metadata):
-    """Add project metadata to the test report (pytest-metadata hook)."""
     metadata["SOVD Version"] = "1.1.0"
 
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_html_results_summary(prefix, summary, postfix):
     """Render metadata keys ending in _URL as clickable links at the top."""
-    if _config is None:
         return
     try:
         from pytest_metadata.plugin import metadata_key
-
-        metadata = _config.stash.get(metadata_key, {})
-    except Exception:
+    except ImportError:
         return
 
+    metadata = _config.stash.get(metadata_key, {})
     for key, url in list(metadata.items()):
         if key.endswith("_URL") and url:
             label = key.replace("_URL", "").replace("_", " ")
@@ -85,51 +88,120 @@ def pytest_sessionfinish(session, exitstatus):
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--opensovd-binary", default=None, help="Path to pre-built opensovd-gateway binary"
-    )
-    parser.addoption(
-        "--opensovd-docker", default=None, help="Docker image:tag to run instead of local binary"
+        "--opensovd-run",
+        default=None,
+        help="Command prefix to run instead of building from source; test args are appended",
     )
     parser.addoption(
         "--opensovd-args",
         default="",
-        help="Additional arguments to pass to the gateway",
+        help="Additional arguments to pass to the binary",
     )
     parser.addoption(
-        "--opensovd-release", action="store_true", default=False, help="Build in release mode"
+        "--opensovd-profile",
+        default=None,
+        help="Cargo profile to build (default: dev; e.g. release, release-small)",
+    )
+    parser.addoption(
+        "--opensovd-target",
+        default=None,
+        help="Cargo --target triple; needed when artifacts live under target/<triple>/...",
     )
     parser.addoption(
         "--opensovd-features", default="", help="Cargo features to enable (comma-separated)"
     )
+    parser.addoption(
+        "--opensovd-coverage",
+        action="store_true",
+        default=False,
+        help="Instrument the workspace with cargo-llvm-cov; writes coverage.json + HTML + "
+        "Cobertura at session end",
+    )
 
 
-@pytest.fixture(scope="module")
-def gateway_args(request) -> list[str]:
-    args = shlex.split(request.config.getoption("--opensovd-args"))
-    return args or default_gateway_args(request.config)
+def _setup_coverage(config):
+    """Clean prior coverage data and inject cargo-llvm-cov's instrumentation env.
 
-
-@pytest.fixture(scope="module")
-def gateway_banner() -> str:
-    """Pattern to wait for before considering the gateway ready.
-
-    Override this fixture to wait for different output patterns,
-    e.g., for CLI tests that don't start a server.
+    Mirrors `source <(cargo llvm-cov show-env --export-prefix)`: the cargo builds
+    and the spawned gateway both inherit os.environ, so RUSTFLAGS instruments the
+    build and LLVM_PROFILE_FILE makes the running gateway emit profile data. Runs
+    from pytest_configure, before collection builds the first test binary.
     """
-    return "Listening addr="
+    if config.getoption("--opensovd-run"):
+        raise pytest.UsageError(
+            "--opensovd-coverage requires building from source; it cannot be combined "
+            "with --opensovd-run"
+        )
+    show_env = subprocess.run(
+        ["cargo", "llvm-cov", "show-env"],
+        cwd=PROJECT_ROOT,
+        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    for line in show_env.stdout.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            # show-env quotes values; shlex unwraps single/double/unquoted alike.
+            os.environ[key] = shlex.split(value)[0] if value else ""
+    subprocess.run(["cargo", "llvm-cov", "clean", "--workspace"], cwd=PROJECT_ROOT, check=True)
+
+    # Render the report at teardown. Config cleanups run after every
+    # sessionfinish hook (incl. the trylast hook in tests/bruno/conftest.py that
+    # closes the shared gateway), so all instrumented processes have exited and
+    # flushed their profile data. Registered only on success, so the UsageError
+    # path above never triggers a report.
+    config.add_cleanup(_write_coverage_report)
+
+
+def _write_coverage_report():
+    """Render the merged coverage data to coverage.json, HTML, and Cobertura.
+
+    Reads the profile data via the env injected by _setup_coverage; no rebuild.
+    """
+    html_dir = PROJECT_ROOT / "target" / "llvm-cov" / "html"
+    subprocess.run(
+        ["cargo", "llvm-cov", "report", "--json", "--output-path", "coverage.json"],
+        cwd=PROJECT_ROOT,
+        check=True,
+    )
+    subprocess.run(["cargo", "llvm-cov", "report", "--html"], cwd=PROJECT_ROOT, check=True)
+    subprocess.run(
+        [
+            "cargo",
+            "llvm-cov",
+            "report",
+            "--cobertura",
+            "--output-path",
+            str(html_dir / "cobertura.xml"),
+        ],
+        cwd=PROJECT_ROOT,
+        check=True,
+    )
 
 
 @pytest.fixture(scope="module")
-def gateway(request, gateway_args, gateway_banner):
-    gw = spawn_gateway(request.config, gateway_args, gateway_banner)
+def crate_bin() -> str:
+    """Cargo crate bin to build and run.
 
-    # Store URL for Bruno tests to access
-    if gw.base_url:
-        request.config._gateway_base_url = gw.base_url
+    Override per test module/directory to target a different crate
+    (e.g. opensovd-mcp). The default is the gateway.
+    """
+    return "opensovd-gateway"
 
-    yield gw
 
-    gw.close()
+@pytest.fixture(scope="module")
+def binary_args(request) -> list[str]:
+    return default_binary_args(request.config)
+
+
+@pytest.fixture(scope="module")
+def ready_banner() -> re.Pattern | None:
+    """Pattern to wait for in stdout before treating the process as ready.
+
+    Default is None (no banner). Crate-specific conftests override.
+    """
+    return None
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
@@ -141,9 +213,12 @@ def pytest_runtest_makereport(item, call):
     markers = list(item.iter_markers(name="req"))
     report.req = [arg for m in markers for arg in m.args]
 
-    # Capture gateway output on failure
+    # Capture process output on failure
     if report.failed and hasattr(item, "funcargs"):
-        gateway = item.funcargs.get("gateway")
-        if gateway and gateway.has_output and not gateway._output_printed:
-            gateway._output_printed = True
-            report.sections.append(("Gateway Output", gateway.stdout))
+        proc = item.funcargs.get("gateway") or item.funcargs.get("mcp")
+        if proc is None:
+            client = item.funcargs.get("client")
+            proc = client.gateway if client is not None else None
+        if proc and proc.has_output and not proc._output_printed:
+            proc._output_printed = True
+            report.sections.append(("Process Output", proc.stdout))

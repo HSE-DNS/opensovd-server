@@ -12,6 +12,9 @@ use std::process::ExitCode;
 use base64::Engine;
 use clap::Parser;
 use futures::StreamExt;
+use anyhow::Context;
+use base64::Engine;
+use clap::Parser;
 use opensovd_core::Topology;
 use opensovd_extra::{JwtAlgorithm, JwtAuthenticator, RegorusAuthorizer};
 #[cfg(feature = "mock")]
@@ -161,7 +164,8 @@ fn create_rego_authorizer(auth: &mut cli::AuthArgs) -> anyhow::Result<RegorusAut
     let policy_data = std::mem::take(&mut auth.policy_data);
 
     let authorizer = RegorusAuthorizer::from_paths(&policies, &policy_data)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .map_err(anyhow::Error::from_boxed)
+        .context("failed to load Rego authorization policies")?;
     tracing::info!(target: TARGET, count = policies.len(), "Rego policy authorization enabled");
     Ok(authorizer)
 }
@@ -175,7 +179,10 @@ where
     Authn: Authenticator,
     Authz: Authorizer<Authn::Identity>,
 {
-    let uri: http::Uri = cli.url.parse()?;
+    let uri: http::Uri = cli
+        .url
+        .parse()
+        .with_context(|| format!("invalid --url {:?}", cli.url))?;
     let base_uri = uri.path();
     let authority = uri
         .authority()
@@ -209,6 +216,12 @@ where
             providers: discovery_list,
         };
         builder = builder.discovery(Box::new(combined_provider));
+    #[cfg(feature = "tls")]
+    {
+        if let Some(tls_config) = cli.tls.build()? {
+            tracing::info!(target: TARGET, "TLS enabled");
+            builder = builder.tls(tls_config);
+        }
     }
 
     let cors = cors::create_cors_layer(
@@ -274,21 +287,29 @@ async fn configure_listener<Vendor, Authn, Authz, Layer>(
         #[cfg(target_os = "linux")]
         let listener = if let Some(name) = socket_path.strip_prefix('@') {
             use std::os::linux::net::SocketAddrExt;
-            let addr = std::os::unix::net::SocketAddr::from_abstract_name(name)?;
-            let std_listener = std::os::unix::net::UnixListener::bind_addr(&addr)?;
+            let addr =
+                std::os::unix::net::SocketAddr::from_abstract_name(name).with_context(|| {
+                    format!("invalid abstract socket name in --unix-socket {socket_path}")
+                })?;
+            let std_listener = std::os::unix::net::UnixListener::bind_addr(&addr)
+                .with_context(|| format!("failed to bind abstract unix socket {socket_path}"))?;
             std_listener.set_nonblocking(true)?;
             UnixListener::from_std(std_listener)?
         } else {
-            UnixListener::bind(socket_path)?
+            UnixListener::bind(socket_path)
+                .with_context(|| format!("failed to bind unix socket {socket_path}"))?
         };
 
         #[cfg(not(target_os = "linux"))]
-        let listener = UnixListener::bind(socket_path)?;
+        let listener = UnixListener::bind(socket_path)
+            .with_context(|| format!("failed to bind unix socket {socket_path}"))?;
 
         return Ok(builder.listener(listener));
     }
 
-    let listener = tokio::net::TcpListener::bind(authority).await?;
+    let listener = tokio::net::TcpListener::bind(authority)
+        .await
+        .with_context(|| format!("failed to bind {authority}"))?;
     Ok(builder.listener(listener))
 }
 
@@ -298,7 +319,9 @@ async fn configure_listener<Vendor, Authn, Authz, Layer>(
     _cli: &cli::Cli,
     authority: &str,
 ) -> anyhow::Result<opensovd_server::ServerBuilder<Vendor, Authn, Authz, Layer>> {
-    let listener = tokio::net::TcpListener::bind(authority).await?;
+    let listener = tokio::net::TcpListener::bind(authority)
+        .await
+        .with_context(|| format!("failed to bind {authority}"))?;
     Ok(builder.listener(listener))
 }
 
@@ -322,7 +345,7 @@ async fn configure_topology<Vendor, Authn, Authz, Layer>(
 
 fn notify_readiness() {
     #[cfg(target_os = "linux")]
-    if let Err(e) = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]) {
+    if let Err(e) = sd_notify::notify(&[sd_notify::NotifyState::Ready]) {
         tracing::warn!(target: TARGET, error = %e, "Failed to notify systemd readiness");
     }
 }

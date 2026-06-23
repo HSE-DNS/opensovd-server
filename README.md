@@ -3,13 +3,6 @@ SPDX-FileCopyrightText: Copyright (c) 2026 Contributors to the Eclipse Foundatio
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# NOTE
-This is a MODIFIED VERSION of the [eclipse-opensovd/opensovd-core](https://github.com/eclipse-opensovd/opensovd-core/tree/inc/liebherr) repository.
-
-For using the CDA-Provider, please SWITCH TO BRANCH [`sovd-connection-cda`](https://github.com/HSE-DNS/opensovd-server/tree/sovd-connection-cda).
-
-Detailed instructions can be found there.
-
 # OpenSOVD Core
 
 > Standardized diagnostic communication for connected vehicles.
@@ -21,7 +14,7 @@ Detailed instructions can be found there.
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Good First Issues](https://img.shields.io/github/issues/eclipse-opensovd/opensovd-core/good%20first%20issue?label=good%20first%20issues&color=blue)](https://github.com/eclipse-opensovd/opensovd-core/labels/good%20first%20issue)
 
-Open-source implementation of the [ISO 22901-1](https://www.iso.org/standard/86587.html) SOVD (Service-Oriented Vehicle Diagnostics) standard.
+Open-source implementation of the [ISO 17978-3:2026](https://www.iso.org/standard/86587.html) SOVD (Service-Oriented Vehicle Diagnostics) standard.
 
 ## Quick Start
 

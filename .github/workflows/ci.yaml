@@ -8,8 +8,8 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
-  #schedule:
-  #  - cron: '0 2 * * *' # 02:00 UTC daily
+  schedule:
+    - cron: '0 2 * * *' # 02:00 UTC daily
   workflow_dispatch:
 
 concurrency:
@@ -26,6 +26,8 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
       release: ${{ steps.check.outputs.release }}
@@ -56,6 +58,16 @@ jobs:
           fi
           echo "should_run=true" >> "$GITHUB_OUTPUT"
 
+  git-lint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     needs: prepare
     if: needs.prepare.outputs.should_run == 'true'
@@ -67,8 +79,8 @@ jobs:
       matrix:
         include:
           - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, profile: release-small, tests: [unittest, pytest]}
-          - {os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, profile: release-small, tests: [unittest]} 
-          - {os: windows-2025, target: x86_64-pc-windows-msvc, profile: release-small, tests: [unittest]}
+          - {os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, profile: release-small, tests: [unittest]}
+          - {os: windows-2025-vs2026, target: x86_64-pc-windows-msvc, profile: release-small, tests: [unittest]}
           - {os: macos-15, target: aarch64-apple-darwin, profile: release-small, tests: [unittest]}
     runs-on: ${{ matrix.os }}
     steps:
@@ -94,7 +106,8 @@ jobs:
       - if: contains(matrix.tests, 'pytest')
         run: |
           uv run pytest tests/ \
-            --opensovd-binary target/${{ matrix.target }}/${{ matrix.profile }}/opensovd-gateway${{ runner.os == 'Windows' && '.exe' || '' }} \
+            --opensovd-target=${{ matrix.target }} \
+            --opensovd-profile=${{ matrix.profile }} \
             --html=pytest-report.html \
             --self-contained-html \
             --metadata "Branch" "${{ github.ref_name }}" \
@@ -104,15 +117,20 @@ jobs:
             --metadata "Coverage_URL" "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/coverage/"
 
       - if: contains(matrix.tests, 'pytest')
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pytest-report
           path: pytest-report.html
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: opensovd-gateway-${{ matrix.target }}
           path: target/${{ matrix.target }}/${{ matrix.profile }}/opensovd-gateway${{ runner.os == 'Windows' && '.exe' || '' }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: opensovd-mcp-${{ matrix.target }}
+          path: target/${{ matrix.target }}/${{ matrix.profile }}/opensovd-mcp${{ runner.os == 'Windows' && '.exe' || '' }}
 
   licenses:
     needs: prepare
@@ -163,6 +181,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           cache-shared-key: ci
@@ -184,6 +204,24 @@ jobs:
 
       - run: uv run prek run --all-files --show-diff-on-failure
 
+      - name: Validate commit subjects (Conventional Commits)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          fail=0
+          for sha in $(git rev-list "$BASE_SHA..$HEAD_SHA"); do
+            git log -1 --format=%B "$sha" > /tmp/commit-msg
+            if ! uv run prek run --hook-stage commit-msg \
+                --commit-msg-filename /tmp/commit-msg conventional-pre-commit; then
+              echo "::error::Non-conventional commit subject: $(git log -1 --format='%h %s' "$sha")"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
   coverage:
     needs: prepare
     if: needs.prepare.outputs.should_run == 'true'
@@ -191,6 +229,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -199,17 +238,48 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@${{ env.CARGO_LLVM_COV_VERSION }}
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm install -g @usebruno/cli
 
-      - run: cargo llvm-cov test --locked --all-features --html
-      - run: cargo llvm-cov report --json --output-path coverage.json
+      # --opensovd-coverage sets up cargo-llvm-cov instrumentation and writes the
+      # merged report (coverage.json + HTML + Cobertura). test_rust.py runs the
+      # Rust unit/integration/doc tests (--all-features) and the e2e tests spawn
+      # the gateway, which inherits LLVM_PROFILE_FILE, so all of it is one report.
+      - name: Collect coverage (Rust + e2e)
+        run: uv run pytest tests/ --opensovd-coverage
 
       - id: cov
         run: |
           PERCENT=$(jq -r '.data[0].totals.lines.percent | floor' coverage.json)
           COLOR=$([[ $PERCENT -ge 80 ]] && echo 28A745 || ([[ $PERCENT -ge 60 ]] && echo B08800 || echo CB2431))
           curl -s "https://img.shields.io/badge/coverage-${PERCENT}%25-${COLOR}" -o target/llvm-cov/html/badge.svg
+          bash scripts/coverage-report.sh coverage.json > coverage-comment.md
+          bash scripts/coverage-report.sh --detail coverage.json >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v6
+      # Post or update a sticky PR comment, identified by the marker on line 1
+      # of the rendered body. Restricted to same-repo PRs since the token is
+      # read-only for forks.
+      - name: Comment coverage on PR
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          jq -Rs '{body: .}' coverage-comment.md > comment.json
+          marker='<!-- coverage-report -->'
+          id=$(gh api --paginate "repos/${REPO}/issues/${PR}/comments" \
+            -q ".[] | select(.body | startswith(\"${marker}\")) | .id" | head -n1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/${REPO}/issues/comments/${id}" --input comment.json >/dev/null
+          else
+            gh api --method POST "repos/${REPO}/issues/${PR}/comments" --input comment.json >/dev/null
+          fi
+
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: target/llvm-cov/html
@@ -222,12 +292,12 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: pytest-report
           path: site
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: coverage-report
           path: site/coverage
@@ -238,11 +308,11 @@ jobs:
             mv site/pytest-report.html site/index.html
           fi
 
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
 
   docker:
     needs: [prepare, build]
@@ -251,93 +321,30 @@ jobs:
     permissions:
       contents: read
       packages: write
+      attestations: write
+      id-token: write
     env:
       DOCKER_BUILD_SUMMARY: false
       DOCKER_BUILD_RECORD_UPLOAD: false
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - {binary: opensovd-gateway, dockerfile: docker/Dockerfile.gateway, smoke: 'uv run pytest tests/opensovd-gateway/cli/test_version.py --opensovd-run="docker run --rm opensovd-gateway:test"'}
+          - {binary: opensovd-mcp, dockerfile: docker/Dockerfile.mcp, smoke: 'uv run pytest tests/opensovd-mcp/cli/test_version.py --opensovd-run="docker run --rm opensovd-mcp:test"'}
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
-          path: target/release-small
-
-      - name: Prepare Docker build
-        id: prepare
-        run: |
-          PLATFORMS=""
-          if [ -d "target/release-small/opensovd-gateway-x86_64-unknown-linux-gnu" ]; then
-            ln -s opensovd-gateway-x86_64-unknown-linux-gnu target/release-small/amd64
-            chmod +x target/release-small/amd64/opensovd-gateway
-            PLATFORMS="linux/amd64"
-          fi
-          if [ -d "target/release-small/opensovd-gateway-aarch64-unknown-linux-gnu" ]; then
-            ln -s opensovd-gateway-aarch64-unknown-linux-gnu target/release-small/arm64
-            chmod +x target/release-small/arm64/opensovd-gateway
-            [ -n "$PLATFORMS" ] && PLATFORMS="$PLATFORMS,"
-            PLATFORMS="${PLATFORMS}linux/arm64"
-          fi
-          echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
-
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata from Cargo.toml
-        id: cargo
-        run: |
-          PKG=$(cargo metadata --format-version 1 --no-deps | jq '.packages[] | select(.name == "opensovd-gateway")')
-          echo "version=$(echo "$PKG" | jq -r '.version')" >> $GITHUB_OUTPUT
-          echo "description=$(echo "$PKG" | jq -r '.description')" >> $GITHUB_OUTPUT
-          echo "license=$(echo "$PKG" | jq -r '.license')" >> $GITHUB_OUTPUT
-          echo "repository=$(echo "$PKG" | jq -r '.repository')" >> $GITHUB_OUTPUT
-
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/opensovd-gateway
-          tags: |
-            type=raw,value=${{ needs.prepare.outputs.release }}
-            type=raw,value=nightly-{{date 'YYYY-MM-DD'}},enable=${{ needs.prepare.outputs.release == 'nightly' }}
-            type=raw,value=latest,enable=${{ needs.prepare.outputs.release == 'latest' || startsWith(needs.prepare.outputs.release, 'v') }}
-          labels: |
-            org.opencontainers.image.title=opensovd-gateway
-            org.opencontainers.image.description=${{ steps.cargo.outputs.description }}
-            org.opencontainers.image.version=${{ steps.cargo.outputs.version }}
-            org.opencontainers.image.licenses=${{ steps.cargo.outputs.license }}
-            org.opencontainers.image.source=${{ steps.cargo.outputs.repository }}
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile
-          load: true
-          tags: opensovd-gateway:test
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: TARGETARCH=amd64
-          cache-from: |
-            type=gha,scope=opensovd-core-${{ github.ref_name }}
-            type=gha,scope=opensovd-core-main
-          cache-to: type=gha,mode=max,scope=opensovd-core-${{ github.ref_name }}
-
+          path: dist
+          pattern: ${{ matrix.image.binary }}-*
       - uses: astral-sh/setup-uv@v7
-      - name: Test Docker image
-        run: uv run pytest tests/test_version.py --opensovd-docker opensovd-gateway:test
-
-      - uses: docker/build-push-action@v6
+      - uses: ./.github/actions/docker-publish
         with:
-          context: .
-          file: docker/Dockerfile
-          push: true
-          platforms: ${{ steps.prepare.outputs.platforms }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          annotations: ${{ steps.meta.outputs.annotations }}
-          cache-from: |
-            type=gha,scope=opensovd-core-${{ github.ref_name }}
-            type=gha,scope=opensovd-core-main
+          binary: ${{ matrix.image.binary }}
+          dockerfile: ${{ matrix.image.dockerfile }}
+          release-tag: ${{ needs.prepare.outputs.release }}
+          smoke-test-cmd: ${{ matrix.image.smoke }}
 
   release:
     needs: [prepare, build]
@@ -355,7 +362,7 @@ jobs:
         with:
           tool: git-cliff@${{ env.GIT_CLIFF_VERSION }}
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -367,21 +374,24 @@ jobs:
             git cliff --current -o CHANGELOG.md
           fi
           mkdir -p artifacts/release
-          for dir in artifacts/opensovd-gateway-*; do
-            target=$(basename "$dir" | sed 's/opensovd-gateway-//')
-            if [[ "$target" == *windows* ]]; then
-              zip "artifacts/release/opensovd-gateway-${VERSION}-${target}.zip" "$dir/opensovd-gateway.exe"
-            else
-              chmod +x "$dir/opensovd-gateway"
-              tar -czf "artifacts/release/opensovd-gateway-${VERSION}-${target}.tar.gz" -C "$dir" opensovd-gateway
-            fi
+          for binary in opensovd-gateway opensovd-mcp; do
+            for dir in artifacts/"${binary}-"*; do
+              [ -d "$dir" ] || continue
+              target=$(basename "$dir" | sed "s/${binary}-//")
+              if [[ "$target" == *windows* ]]; then
+                zip "artifacts/release/${binary}-${VERSION}-${target}.zip" "$dir/${binary}.exe"
+              else
+                chmod +x "$dir/${binary}"
+                tar -czf "artifacts/release/${binary}-${VERSION}-${target}.tar.gz" -C "$dir" "${binary}"
+              fi
+            done
           done
           cd artifacts/release
           for file in *.tar.gz *.zip; do
             sha512sum "$file" > "$file.sha512"
           done
 
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         if: github.repository_owner == 'eclipse-opensovd'
         with:
           subject-path: 'artifacts/release/*'
@@ -402,9 +412,10 @@ jobs:
             artifacts/release/*
 
   gate:
-    needs: [prepare, build, licenses, advisories, lint, coverage, pages, docker, release]
+    needs: [prepare, git-lint, build, licenses, advisories, lint, coverage, pages, docker, release]
     if: always()
     runs-on: ubuntu-24.04
+    permissions: {}
     steps:
       - run: |
           if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then

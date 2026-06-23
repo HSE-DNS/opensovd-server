@@ -6,17 +6,17 @@ name = "opensovd-tests"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
-    "cryptography>=46.0.0",
-    "pytest>=9.0.2",
+    "cryptography>=48.0.0",
+    "pytest>=9.0.3",
     "httpx>=0.28.1",
     "jsonschema>=4.26",
-    "openapi-spec-validator>=0.7.2",
-    "PyJWT>=2.10",
+    "openapi-spec-validator>=0.9.0",
+    "PyJWT>=2.13.0",
 ]
 
 [dependency-groups]
-tools = ["prek>=0.3.1", "ruff>=0.14.14", "ty>=0.0.14"]
-docs = ["sphinx>=9.1", "furo>=2025.12.19", "myst-parser>=5.0"]
+tools = ["prek>=0.4.3", "ruff>=0.15.15", "ty>=0.0.42"]
+docs = ["sphinx>=9.1", "furo>=2025.12.19", "myst-parser>=5.1.0"]
 dev = [
     "pytest-html>=4.2.0",
     "pytest-metadata>=3.1.1",
@@ -25,6 +25,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
+# importlib mode lets per-crate dirs (opensovd-gateway/cli/, opensovd-mcp/cli/)
+# share filenames like test_version.py without basename collisions.
+addopts = "--import-mode=importlib"
 markers = [
     "conformance: Conformance tests (require bru CLI)",
     "schema: Tests that validate response schema",
