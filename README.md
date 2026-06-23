@@ -3,6 +3,13 @@ SPDX-FileCopyrightText: Copyright (c) 2026 Contributors to the Eclipse Foundatio
 SPDX-License-Identifier: Apache-2.0
 -->
 
+# NOTE
+This is a MODIFIED VERSION of the [eclipse-opensovd/opensovd-core](https://github.com/eclipse-opensovd/opensovd-core/tree/inc/liebherr) repository.
+
+For using the CDA-Provider, please SWITCH TO BRANCH [`sovd-connection-cda`](https://github.com/HSE-DNS/opensovd-server/tree/sovd-connection-cda).
+
+Detailed instructions can be found there.
+
 # OpenSOVD Core
 
 > Standardized diagnostic communication for connected vehicles.
