@@ -13,8 +13,6 @@ use base64::Engine;
 use clap::Parser;
 use futures::StreamExt;
 use anyhow::Context;
-use base64::Engine;
-use clap::Parser;
 use opensovd_core::Topology;
 use opensovd_extra::{JwtAlgorithm, JwtAuthenticator, RegorusAuthorizer};
 #[cfg(feature = "mock")]
@@ -110,23 +108,7 @@ struct CompositeDiscoveryProvider {
 impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
     async fn discover(
         &self,
-    ) -> Result<
-        std::pin::Pin<
-            Box<
-                dyn futures::stream::Stream<
-                        Item = Result<
-                            (
-                                Vec<opensovd_core::EntityRef>,
-                                opensovd_core::EntityCollection,
-                            ),
-                            opensovd_core::DiscoveryError,
-                        >,
-                    > + Send
-                    + 'static,
-            >,
-        >,
-        opensovd_core::DiscoveryError,
-    > {
+    ) -> Result<opensovd_core::DiscoveryStream, opensovd_core::DiscoveryError> {
         let mut futures_list = Vec::new();
         for p in &self.providers {
             futures_list.push(p.discover());
@@ -155,6 +137,7 @@ impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
             }
             result
         });
+        
         Ok(Box::pin(combined))
     }
 }
@@ -216,6 +199,8 @@ where
             providers: discovery_list,
         };
         builder = builder.discovery(Box::new(combined_provider));
+    }
+
     #[cfg(feature = "tls")]
     {
         if let Some(tls_config) = cli.tls.build()? {
