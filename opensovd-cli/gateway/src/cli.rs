@@ -60,6 +60,8 @@ pub struct Cli {
     #[command(flatten)]
     pub auth: AuthArgs,
 
+    #[command(flatten)]
+    pub zenoh: ZenohArgs,
     #[cfg(feature = "tls")]
     #[command(flatten)]
     pub tls: TlsArgs,
@@ -221,4 +223,12 @@ pub struct AuthArgs {
     /// JSON data file for Rego policies.
     #[arg(long = "auth-policy-data", value_name = "FILE")]
     pub policy_data: Vec<PathBuf>,
+}
+
+#[derive(Args)]
+#[command(next_help_heading = "Zenoh Options")]
+pub struct ZenohArgs {
+    /// Zenoh router endpoint to connect to.
+    #[arg(long = "zenoh-endpoint", value_name = "ENDPOINT", env = "ZENOH_ENDPOINT", default_value = "tcp/host.docker.internal:7447")]
+    pub endpoint: String,
 }

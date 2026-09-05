@@ -9,9 +9,10 @@ mod serve_dir;
 
 use std::process::ExitCode;
 
-use anyhow::Context;
 use base64::Engine;
 use clap::Parser;
+use futures::StreamExt;
+use anyhow::Context;
 use opensovd_core::Topology;
 use opensovd_extra::{JwtAlgorithm, JwtAuthenticator, RegorusAuthorizer};
 #[cfg(feature = "mock")]
@@ -37,12 +38,16 @@ const VENDOR_INFO: OpenSovdInfo = OpenSovdInfo {
     name: "OpenSOVD",
 };
 
-#[tokio::main(flavor = "current_thread")]
+//#[tokio::main(flavor = "current_thread")]
+#[tokio::main(flavor = "multi_thread", worker_threads = 1)]
 #[allow(clippy::print_stderr)]
 async fn main() -> ExitCode {
     let cli = cli::Cli::parse();
 
-    if let Err(e) = libcli::init_tracing("gw=info,srv=info,tower_http=debug,axum=trace", None) {
+    if let Err(e) = libcli::init_tracing(
+        "gw=info,srv=info,tower_http=debug,axum=trace,opensovd_providers=info",
+        None,
+    ) {
         eprintln!("Failed to initialize tracing: {e}");
         return ExitCode::FAILURE;
     }
@@ -85,15 +90,56 @@ fn create_jwt_authenticator(
     let algo: JwtAlgorithm = auth
         .jwt_algo
         .parse()
-        .map_err(|e: String| anyhow::anyhow!(e))
-        .with_context(|| format!("invalid --auth-jwt-algo {:?}", auth.jwt_algo))?;
-    let key = base64::engine::general_purpose::STANDARD
-        .decode(secret)
-        .context("--auth-jwt-secret must be base64-encoded")?;
+        .map_err(|e: String| anyhow::anyhow!(e))?;
+    let key = base64::engine::general_purpose::STANDARD.decode(secret)?;
     let issuer = std::mem::take(&mut auth.jwt_issuer);
 
     tracing::info!(target: TARGET, %algo, %issuer, "JWT authentication enabled");
     Ok(JwtAuthenticator::new(algo, &key, &issuer))
+}
+
+// Using multiple Discovery Providers simultaneously
+struct CompositeDiscoveryProvider {
+    providers: Vec<Box<dyn opensovd_core::DiscoveryProvider>>,
+}
+
+
+#[async_trait::async_trait]
+impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
+    async fn discover(
+        &self,
+    ) -> Result<opensovd_core::DiscoveryStream, opensovd_core::DiscoveryError> {
+        let mut futures_list = Vec::new();
+        for p in &self.providers {
+            futures_list.push(p.discover());
+        }
+
+        let mut streams = Vec::new();
+        for res in futures::future::join_all(futures_list).await {
+            match res {
+                Ok(stream) => streams.push(stream),
+                Err(e) => tracing::error!("Provider initialization failed: {e}"),
+            }
+        }
+
+        // Combines provider responses into stream/logs errors.
+        let combined = futures::stream::select_all(streams).map(|result| {
+            match &result {
+                Ok((_, collection)) => {
+                    tracing::info!(
+                        "Provider discovered {} components",
+                        collection.components.len()
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("Discovery stream error (Zenoh): {e}");
+                }
+            }
+            result
+        });
+        
+        Ok(Box::pin(combined))
+    }
 }
 
 fn create_rego_authorizer(auth: &mut cli::AuthArgs) -> anyhow::Result<RegorusAuthorizer> {
@@ -134,6 +180,26 @@ where
 
     builder = configure_listener(builder, &cli, authority).await?;
     builder = configure_topology(builder, &cli).await;
+
+    let mut discovery_list: Vec<Box<dyn opensovd_core::DiscoveryProvider>> = Vec::new();
+
+    let zenoh_config = opensovd_providers::zenoh::ZenohConfig {
+        endpoint: cli.zenoh.endpoint.clone(), // Uses the IP/Port from CLI arguments
+        discovery_selector: "**".to_string(), // Finds everything; change to "robots/**" if needed
+        robot_name_index: 0,                  // 0 = first part of path is the robot name
+        category: "Zenoh-Telemetry".to_string(),
+    };
+
+    let zenoh_provider = opensovd_providers::zenoh::ZenohProvider::new(zenoh_config).await?;
+    discovery_list.push(Box::new(zenoh_provider));
+    tracing::info!(target: TARGET, "Zenoh discovery provider added to list");
+
+    if !discovery_list.is_empty() {
+        let combined_provider = CompositeDiscoveryProvider {
+            providers: discovery_list,
+        };
+        builder = builder.discovery(Box::new(combined_provider));
+    }
 
     #[cfg(feature = "tls")]
     {

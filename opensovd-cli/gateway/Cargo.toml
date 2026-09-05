@@ -25,6 +25,9 @@ http2 = ["opensovd-server/http2"]
 tls = ["opensovd-server/tls", "dep:rustls"]
 
 [dependencies]
+futures = { workspace = true }
+async-trait = { workspace = true }
+opensovd-providers = { workspace = true }
 anyhow = { workspace = true }
 libcli = { workspace = true }
 opensovd-server = { workspace = true }

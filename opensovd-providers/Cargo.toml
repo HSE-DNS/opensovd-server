@@ -13,6 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
 opensovd-core = { workspace = true }
 opensovd-models = { workspace = true }
 async-trait = { workspace = true }
@@ -21,6 +22,12 @@ schemars = { workspace = true, features = ["derive", "std"] }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
+futures.workspace = true
+tokio.workspace = true
+reqwest = "0.13.2"
+tracing.workspace = true
+zenoh = "1.0.0"
+
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
