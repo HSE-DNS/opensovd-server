@@ -1,17 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Contributors to the Eclipse Foundation
 # SPDX-License-Identifier: Apache-2.0
 
-"""Pytest configuration and fixtures for end2end tests."""
-
-import os
-import re
-import shlex
-import subprocess
-from pathlib import Path
+"""Pytest config: load the opensovd_e2e plugin, add OpenSOVD-core overrides."""
 
 import pytest
 from fixtures import default_binary_args
 
+pytest_plugins = ["opensovd_e2e.plugin"]
 PROJECT_ROOT = Path(__file__).parent.parent
 
 # --- Session metadata (shown in HTML report header) ---
@@ -181,44 +176,18 @@ def _write_coverage_report():
 
 
 @pytest.fixture(scope="module")
-def crate_bin() -> str:
-    """Cargo crate bin to build and run.
-
-    Override per test module/directory to target a different crate
-    (e.g. opensovd-mcp). The default is the gateway.
-    """
+def crate_binary() -> str:
+    """Default crate for the in-repo suite (override per crate dir, e.g. mcp)."""
     return "opensovd-gateway"
 
 
 @pytest.fixture(scope="module")
 def binary_args(request) -> list[str]:
+    """Inject an ephemeral server ``--url`` by default (SOVD HTTP server)."""
     return default_binary_args(request.config)
 
 
-@pytest.fixture(scope="module")
-def ready_banner() -> re.Pattern | None:
-    """Pattern to wait for in stdout before treating the process as ready.
-
-    Default is None (no banner). Crate-specific conftests override.
-    """
-    return None
-
-
-@pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item, call):
-    outcome = yield
-    report = outcome.get_result()
-
-    # Capture requirement markers for HTML report
-    markers = list(item.iter_markers(name="req"))
-    report.req = [arg for m in markers for arg in m.args]
-
-    # Capture process output on failure
-    if report.failed and hasattr(item, "funcargs"):
-        proc = item.funcargs.get("gateway") or item.funcargs.get("mcp")
-        if proc is None:
-            client = item.funcargs.get("client")
-            proc = client.gateway if client is not None else None
-        if proc and proc.has_output and not proc._output_printed:
-            proc._output_printed = True
-            report.sections.append(("Process Output", proc.stdout))
+@pytest.hookimpl(optionalhook=True)
+def pytest_metadata(metadata):
+    """Add project metadata to the test report (pytest-metadata hook)."""
+    metadata["SOVD Version"] = "1.1.0"

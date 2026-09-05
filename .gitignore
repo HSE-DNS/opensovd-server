@@ -3,6 +3,7 @@ coverage.json
 dist/
 __pycache__/
 *.pyc
+.direnv/
 .devenv/
 .devenv.flake.nix
 *.pid

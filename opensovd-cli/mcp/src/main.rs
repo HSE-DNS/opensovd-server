@@ -8,15 +8,14 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use opensovd_client::Client;
+use opensovd_models::{Response, discovery::Entities};
 use rmcp::{
-    RoleServer, ServerHandler, ServiceExt,
+    Json, RoleServer, ServerHandler, ServiceExt,
     handler::server::{router::prompt::PromptRouter, tool::ToolRouter},
     model::{
-        AnnotateAble, CallToolResult, ErrorData as McpError, GetPromptRequestParams,
-        GetPromptResult, Implementation, ListPromptsResult, ListResourcesResult,
-        PaginatedRequestParams, PromptMessage, PromptMessageRole, RawResource,
-        ReadResourceRequestParams, ReadResourceResult, ResourceContents, ServerCapabilities,
-        ServerInfo,
+        ErrorData as McpError, GetPromptResult, Implementation, ListResourcesResult,
+        PaginatedRequestParams, PromptMessage, ReadResourceRequestParams, ReadResourceResponse,
+        ReadResourceResult, Resource, ResourceContents, Role, ServerCapabilities, ServerInfo,
     },
     prompt, prompt_handler, prompt_router,
     service::RequestContext,
@@ -26,6 +25,11 @@ use rmcp::{
 const TARGET: &str = "srv";
 
 const TOPOLOGY_URI: &str = "sovd://topology";
+
+#[allow(clippy::needless_pass_by_value)]
+fn internal(e: impl ToString) -> McpError {
+    McpError::internal_error(e.to_string(), None)
+}
 
 #[derive(Clone)]
 struct McpServer {
@@ -37,45 +41,39 @@ struct McpServer {
 #[tool_router]
 impl McpServer {
     #[tool(description = "List all SOVD components")]
-    async fn list_components(&self) -> Result<CallToolResult, McpError> {
+    async fn list_components(&self) -> Result<Json<Response<Entities>>, McpError> {
         let response = self
             .client
             .list_components()
             .schema(true)
             .send()
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        let value = serde_json::to_value(&response)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        Ok(CallToolResult::structured(value))
+            .map_err(internal)?;
+        Ok(Json(response))
     }
 
     #[tool(description = "List all SOVD areas")]
-    async fn list_areas(&self) -> Result<CallToolResult, McpError> {
+    async fn list_areas(&self) -> Result<Json<Response<Entities>>, McpError> {
         let response = self
             .client
             .list_areas()
             .schema(true)
             .send()
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        let value = serde_json::to_value(&response)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        Ok(CallToolResult::structured(value))
+            .map_err(internal)?;
+        Ok(Json(response))
     }
 
     #[tool(description = "List all SOVD apps")]
-    async fn list_apps(&self) -> Result<CallToolResult, McpError> {
+    async fn list_apps(&self) -> Result<Json<Response<Entities>>, McpError> {
         let response = self
             .client
             .list_apps()
             .schema(true)
             .send()
             .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        let value = serde_json::to_value(&response)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        Ok(CallToolResult::structured(value))
+            .map_err(internal)?;
+        Ok(Json(response))
     }
 }
 
@@ -97,7 +95,7 @@ impl McpServer {
     )]
     async fn explore_topology(&self) -> GetPromptResult {
         GetPromptResult::new(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             "Read the sovd://topology resource, then:\n\
                  1. List components\n\
                  2. List areas\n\
@@ -136,30 +134,17 @@ impl ServerHandler for McpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
-        let resource = RawResource {
-            uri: TOPOLOGY_URI.into(),
-            name: "Vehicle Topology".into(),
-            description: Some(
-                "Snapshot of the SOVD entity hierarchy: components, areas, and apps.".into(),
-            ),
-            mime_type: Some("text/plain".into()),
-            title: None,
-            size: None,
-            icons: None,
-            meta: None,
-        };
-        Ok(ListResourcesResult {
-            resources: vec![resource.no_annotation()],
-            next_cursor: None,
-            meta: None,
-        })
+        let resource = Resource::new(TOPOLOGY_URI, "Vehicle Topology")
+            .with_description("Snapshot of the SOVD entity hierarchy: components, areas, and apps.")
+            .with_mime_type("text/plain");
+        Ok(ListResourcesResult::with_all_items(vec![resource]))
     }
 
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, McpError> {
+    ) -> Result<ReadResourceResponse, McpError> {
         if request.uri != TOPOLOGY_URI {
             return Err(McpError::resource_not_found(
                 format!("unknown resource: {}", request.uri),
@@ -168,27 +153,9 @@ impl ServerHandler for McpServer {
         }
 
         let (components, areas, apps) = tokio::try_join!(
-            async {
-                self.client
-                    .list_components()
-                    .send()
-                    .await
-                    .map_err(|e| McpError::internal_error(e.to_string(), None))
-            },
-            async {
-                self.client
-                    .list_areas()
-                    .send()
-                    .await
-                    .map_err(|e| McpError::internal_error(e.to_string(), None))
-            },
-            async {
-                self.client
-                    .list_apps()
-                    .send()
-                    .await
-                    .map_err(|e| McpError::internal_error(e.to_string(), None))
-            },
+            async { self.client.list_components().send().await.map_err(internal) },
+            async { self.client.list_areas().send().await.map_err(internal) },
+            async { self.client.list_apps().send().await.map_err(internal) },
         )?;
 
         let mut text = String::new();
@@ -223,10 +190,7 @@ impl ServerHandler for McpServer {
             let _ = writeln!(text, "- {name} (id: {id})", name = app.name, id = app.id);
         }
 
-        Ok(ReadResourceResult::new(vec![ResourceContents::text(
-            text,
-            TOPOLOGY_URI,
-        )]))
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(text, TOPOLOGY_URI)]).into())
     }
 }
 
@@ -366,9 +330,7 @@ mod tests {
 
         let text = match &result.contents[0] {
             ResourceContents::TextResourceContents { text, .. } => text.as_str(),
-            ResourceContents::BlobResourceContents { .. } => {
-                panic!("expected text resource contents")
-            }
+            _ => panic!("expected text resource contents"),
         };
 
         assert!(text.contains("Engine ECU"), "expected component name");
@@ -408,11 +370,11 @@ mod tests {
 
         assert!(!result.messages.is_empty(), "expected at least one message");
         let msg = &result.messages[0];
-        assert_eq!(msg.role, PromptMessageRole::User);
+        assert_eq!(msg.role, Role::User);
         match &msg.content {
-            rmcp::model::PromptMessageContent::Text { text } => {
+            rmcp::model::ContentBlock::Text(c) => {
                 assert!(
-                    text.contains("topology"),
+                    c.text.contains("topology"),
                     "expected prompt to mention topology"
                 );
             }
@@ -424,9 +386,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_tools_advertise_output_schema() -> TestResult {
+        let connector = mock_http_connector::Connector::builder().build();
+        let client = setup(mock_client(connector)).await;
+
+        let tools = client.list_tools(Option::default()).await?;
+
+        for name in ["list_components", "list_areas", "list_apps"] {
+            let tool = tools
+                .tools
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("expected tool {name}"));
+            let schema = tool
+                .output_schema
+                .as_ref()
+                .unwrap_or_else(|| panic!("expected output schema for {name}"));
+            assert_eq!(
+                schema.get("type").and_then(|t| t.as_str()),
+                Some("object"),
+                "{name}: root must be an object"
+            );
+            let properties = schema.get("properties");
+            assert!(
+                properties.is_some_and(|p| p.get("items").is_some()),
+                "{name}: expected items property"
+            );
+            assert!(
+                properties.is_some_and(|p| p.get("schema").is_some()),
+                "{name}: expected schema property"
+            );
+        }
+
+        client.cancel().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn list_components_returns_json() -> TestResult {
-        let components = serde_json::to_string(&opensovd_models::Items {
-            items: vec![entity("components", "ecu1", "Engine ECU")],
+        let components = serde_json::to_string(&opensovd_models::Response {
+            data: opensovd_models::Items {
+                items: vec![entity("components", "ecu1", "Engine ECU")],
+            },
+            schema: Some(serde_json::json!({"type": "object"})),
         })?;
 
         let mut builder = mock_http_connector::Connector::builder();
@@ -447,6 +449,10 @@ mod tests {
         let text = serde_json::to_string(&structured)?;
         assert!(text.contains("Engine ECU"), "expected component name");
         assert!(text.contains("ecu1"), "expected component id");
+        let schema = structured
+            .get("schema")
+            .expect("expected schema in tool output");
+        assert_eq!(schema["type"], "object");
 
         client.cancel().await?;
         Ok(())
@@ -454,8 +460,11 @@ mod tests {
 
     #[tokio::test]
     async fn list_areas_returns_json() -> TestResult {
-        let areas = serde_json::to_string(&opensovd_models::Items {
-            items: vec![entity("areas", "powertrain", "Powertrain")],
+        let areas = serde_json::to_string(&opensovd_models::Response {
+            data: opensovd_models::Items {
+                items: vec![entity("areas", "powertrain", "Powertrain")],
+            },
+            schema: Some(serde_json::json!({"type": "object"})),
         })?;
 
         let mut builder = mock_http_connector::Connector::builder();
@@ -476,6 +485,10 @@ mod tests {
         let text = serde_json::to_string(&structured)?;
         assert!(text.contains("Powertrain"), "expected area name");
         assert!(text.contains("powertrain"), "expected area id");
+        let schema = structured
+            .get("schema")
+            .expect("expected schema in tool output");
+        assert_eq!(schema["type"], "object");
 
         client.cancel().await?;
         Ok(())
@@ -483,8 +496,11 @@ mod tests {
 
     #[tokio::test]
     async fn list_apps_returns_json() -> TestResult {
-        let apps = serde_json::to_string(&opensovd_models::Items {
-            items: vec![entity("apps", "diag_app", "Diagnostic App")],
+        let apps = serde_json::to_string(&opensovd_models::Response {
+            data: opensovd_models::Items {
+                items: vec![entity("apps", "diag_app", "Diagnostic App")],
+            },
+            schema: Some(serde_json::json!({"type": "object"})),
         })?;
 
         let mut builder = mock_http_connector::Connector::builder();
@@ -505,6 +521,10 @@ mod tests {
         let text = serde_json::to_string(&structured)?;
         assert!(text.contains("Diagnostic App"), "expected app name");
         assert!(text.contains("diag_app"), "expected app id");
+        let schema = structured
+            .get("schema")
+            .expect("expected schema in tool output");
+        assert_eq!(schema["type"], "object");
 
         client.cancel().await?;
         Ok(())
