@@ -1,12 +1,15 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 Contributors to the Eclipse Foundation
+// SPDX-License-Identifier: Apache-2.0
+use std::collections::HashMap;
+use std::pin::Pin;
+
 use anyhow::anyhow;
 use async_trait::async_trait;
 use opensovd_core::{
     Component, Data, DataError, DataFilter, DataProvider, DiscoveryError, DiscoveryProvider,
     EntityCollection, EntityRef, Metadata,
 };
-use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::pin::Pin;
+use serde_json::{Value, json};
 use zenoh::Session;
 
 pub struct ZenohConfig {
@@ -39,12 +42,19 @@ pub struct ZenohProvider {
 }
 
 impl ZenohProvider {
+    #[allow(clippy::missing_errors_doc)]
     pub async fn new(config: ZenohConfig) -> anyhow::Result<Self> {
         let mut zenoh_config = zenoh::Config::default();
-        zenoh_config.insert_json5("mode", r#""client""#).map_err(|e| anyhow!("{e}"))?;
+        zenoh_config
+            .insert_json5("mode", r#""client""#)
+            .map_err(|e| anyhow!("{e}"))?;
         let endpoints_json = format!(r#"["{}"]"#, config.endpoint);
-        zenoh_config.insert_json5("connect/endpoints", &endpoints_json).map_err(|e| anyhow!("{e}"))?;
-        let session = zenoh::open(zenoh_config).await.map_err(|e| anyhow!("{e}"))?;
+        zenoh_config
+            .insert_json5("connect/endpoints", &endpoints_json)
+            .map_err(|e| anyhow!("{e}"))?;
+        let session = zenoh::open(zenoh_config)
+            .await
+            .map_err(|e| anyhow!("{e}"))?;
         tracing::info!("ZenohProvider connected to {}", config.endpoint);
         Ok(Self { session, config })
     }
@@ -61,14 +71,26 @@ impl DiscoveryProvider for ZenohProvider {
     async fn discover(
         &self,
     ) -> Result<
-        Pin<Box<dyn futures::stream::Stream<Item = Result<(Vec<EntityRef>, EntityCollection), DiscoveryError>> + Send + 'static>>,
+        Pin<
+            Box<
+                dyn futures::stream::Stream<
+                        Item = Result<(Vec<EntityRef>, EntityCollection), DiscoveryError>,
+                    > + Send
+                    + 'static,
+            >,
+        >,
         DiscoveryError,
     > {
         let mut collection = EntityCollection::default();
 
-        tracing::info!("Starting discovery with selector: {}", self.config.discovery_selector);
+        tracing::info!(
+            "Starting discovery with selector: {}",
+            self.config.discovery_selector
+        );
 
-        let replies = self.session.get(&self.config.discovery_selector)
+        let replies = self
+            .session
+            .get(&self.config.discovery_selector)
             .await
             .map_err(|e| DiscoveryError::Other(e.to_string().into()))?;
 
@@ -87,7 +109,7 @@ impl DiscoveryProvider for ZenohProvider {
 
                 if let Some(robot_name) = parts.get(self.config.robot_name_index) {
                     let robot_name = robot_name.to_string();
-                    let prefix = format!("{}/", robot_name);
+                    let prefix = format!("{robot_name}/");
                     let relative_key = key.strip_prefix(&prefix).unwrap_or(key);
                     let data_id = relative_key.replace('/', "_");
 
@@ -98,37 +120,50 @@ impl DiscoveryProvider for ZenohProvider {
                     // Parse the ZenohQuery envelope to extract name and category.
                     // Falls back to a derived name and the config default if the payload
                     // does not contain these fields.
-                    let payload_str = String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned();
+                    let payload_str =
+                        String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned();
                     let json_payload: Option<Value> = serde_json::from_str(&payload_str).ok();
 
-                    let display_name = json_payload.as_ref()
+                    let display_name = json_payload
+                        .as_ref()
                         .and_then(|v| v.get("name"))
                         .and_then(|v| v.as_str())
-                        .map(String::from)
-                        .unwrap_or_else(|| data_id.replace('_', " "));
+                        .map_or_else(|| data_id.replace('_', " "), String::from);
 
-                    let category = json_payload.as_ref()
+                    let category = json_payload
+                        .as_ref()
                         .and_then(|v| v.get("category"))
                         .and_then(|v| v.as_str())
-                        .map(String::from)
-                        .unwrap_or_else(|| self.config.category.clone());
+                        .map_or_else(|| self.config.category.clone(), String::from);
 
                     tracing::info!(
                         "Discovered: robot='{}', id='{}', name='{}', category='{}'",
-                        robot_name, data_id, display_name, category
+                        robot_name,
+                        data_id,
+                        display_name,
+                        category
                     );
 
-                    robot_map
-                        .entry(robot_name)
-                        .or_default()
-                        .insert(data_id.clone(), DataPointMeta { id: data_id, name: display_name, category });
+                    robot_map.entry(robot_name).or_default().insert(
+                        data_id.clone(),
+                        DataPointMeta {
+                            id: data_id,
+                            name: display_name,
+                            category,
+                        },
+                    );
                 }
             }
         }
 
         for (robot_name, points) in robot_map {
-            tracing::info!("Component created: '{}' with {} data points", robot_name, points.len());
-            let mut component = Component::new(robot_name.clone(), format!("Zenoh Robot {robot_name}"));
+            tracing::info!(
+                "Component created: '{}' with {} data points",
+                robot_name,
+                points.len()
+            );
+            let mut component =
+                Component::new(robot_name.clone(), format!("Zenoh Robot {robot_name}"));
 
             component = component.with_data_provider(ZenohDataProvider {
                 session: self.session.clone(),
@@ -143,7 +178,6 @@ impl DiscoveryProvider for ZenohProvider {
         Ok(Box::pin(stream))
     }
 }
-
 
 pub struct ZenohDataProvider {
     session: Session,
@@ -194,7 +228,11 @@ impl DataProvider for ZenohDataProvider {
             return Err(DataError::NotFound(data_id.to_string()));
         };
 
-        let replies = self.session.get(&key).await.map_err(|e| DataError::Internal(e.to_string()))?;
+        let replies = self
+            .session
+            .get(&key)
+            .await
+            .map_err(|e| DataError::Internal(e.to_string()))?;
 
         let mut data_map = serde_json::Map::new();
         let mut found_any = false;
@@ -207,8 +245,8 @@ impl DataProvider for ZenohDataProvider {
                 let relative_key = full_key.strip_prefix(&prefix).unwrap_or(full_key);
 
                 let body = String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned();
-                let json_payload: Value = serde_json::from_str(&body)
-                    .unwrap_or_else(|_| json!({ "raw_value": body }));
+                let json_payload: Value =
+                    serde_json::from_str(&body).unwrap_or_else(|_| json!({ "raw_value": body }));
 
                 // Extract only the data field from the ZenohQuery envelope.
                 // If the payload has no "data" field, use the whole payload as-is.
@@ -220,16 +258,24 @@ impl DataProvider for ZenohDataProvider {
         }
 
         if !found_any && data_id != "telemetry" {
-            return Err(DataError::NotFound(format!("No data found for {data_id} in Zenoh")));
+            return Err(DataError::NotFound(format!(
+                "No data found for {data_id} in Zenoh"
+            )));
         }
 
         let payload = if data_id == "telemetry" {
             Value::Object(data_map)
         } else {
-            data_map.get(data_id).cloned().unwrap_or_else(|| json!(data_map))
+            data_map
+                .get(data_id)
+                .cloned()
+                .unwrap_or_else(|| json!(data_map))
         };
 
-        Ok(Data { data: payload, schema: None })
+        Ok(Data {
+            data: payload,
+            schema: None,
+        })
     }
 
     async fn write(&self, _data_id: &str, _value: Value) -> Result<(), DataError> {
@@ -242,9 +288,10 @@ impl DataProvider for ZenohDataProvider {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::*;
     use opensovd_core::{DataFilter, DataProvider};
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn test_zenoh_config_default() {
@@ -257,9 +304,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_zenoh_provider_list_metadata() {
-        let config = zenoh::Config::default(); 
+        let config = zenoh::Config::default();
         let session = zenoh::open(config).await.unwrap();
-        
+
         let provider = ZenohDataProvider {
             session,
             robot_name: "TestRobot".to_string(),
@@ -272,7 +319,7 @@ mod tests {
         };
 
         let metadata = provider.list(DataFilter::default()).await.unwrap();
-        
+
         // expecting 2 entries (telemetry + speed_sensor)
         assert_eq!(metadata.len(), 2);
         assert_eq!(metadata[0].id, "telemetry");
@@ -284,7 +331,12 @@ mod tests {
     async fn test_zenoh_provider_write_fails() {
         let config = zenoh::Config::default();
         let session = zenoh::open(config).await.unwrap();
-        let provider = ZenohDataProvider { session, robot_name: "R1".to_string(), data_points: vec![], fallback_category: "".to_string() };
+        let provider = ZenohDataProvider {
+            session,
+            robot_name: "R1".to_string(),
+            data_points: vec![],
+            fallback_category: String::new(),
+        };
 
         let result = provider.write("any_id", json!("some_value")).await;
         assert!(result.is_err());

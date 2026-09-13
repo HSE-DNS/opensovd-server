@@ -9,10 +9,10 @@ mod serve_dir;
 
 use std::process::ExitCode;
 
+use anyhow::Context;
 use base64::Engine;
 use clap::Parser;
 use futures::StreamExt;
-use anyhow::Context;
 use opensovd_core::Topology;
 use opensovd_extra::{JwtAlgorithm, JwtAuthenticator, RegorusAuthorizer};
 #[cfg(feature = "mock")]
@@ -103,7 +103,6 @@ struct CompositeDiscoveryProvider {
     providers: Vec<Box<dyn opensovd_core::DiscoveryProvider>>,
 }
 
-
 #[async_trait::async_trait]
 impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
     async fn discover(
@@ -137,7 +136,7 @@ impl opensovd_core::DiscoveryProvider for CompositeDiscoveryProvider {
             }
             result
         });
-        
+
         Ok(Box::pin(combined))
     }
 }

@@ -229,6 +229,11 @@ pub struct AuthArgs {
 #[command(next_help_heading = "Zenoh Options")]
 pub struct ZenohArgs {
     /// Zenoh router endpoint to connect to.
-    #[arg(long = "zenoh-endpoint", value_name = "ENDPOINT", env = "ZENOH_ENDPOINT", default_value = "tcp/host.docker.internal:7447")]
+    #[arg(
+        long = "zenoh-endpoint",
+        value_name = "ENDPOINT",
+        env = "ZENOH_ENDPOINT",
+        default_value = "tcp/host.docker.internal:7447"
+    )]
     pub endpoint: String,
 }

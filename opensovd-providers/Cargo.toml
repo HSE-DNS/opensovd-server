@@ -24,7 +24,6 @@ serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 futures.workspace = true
 tokio.workspace = true
-reqwest = "0.13.2"
 tracing.workspace = true
 zenoh = "1.0.0"
 
