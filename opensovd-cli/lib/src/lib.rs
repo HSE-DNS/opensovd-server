@@ -119,6 +119,7 @@ pub fn init_tracing(default_filter: &str, log_file: Option<&Path>) -> std::io::R
             .init();
     } else {
         tracing_subscriber::fmt()
+            .with_ansi(false)
             .event_format(CompactFormat)
             .with_env_filter(env_filter(default_filter))
             .init();

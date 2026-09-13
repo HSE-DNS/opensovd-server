@@ -303,6 +303,8 @@ async fn configure_topology<Vendor, Authn, Authz, Layer>(
 
     #[cfg(not(feature = "mock"))]
     let topology = Topology::default();
+
+    
     let _zenoh_endpoint = &cli.zenoh.endpoint;
 
     builder.topology(topology)
