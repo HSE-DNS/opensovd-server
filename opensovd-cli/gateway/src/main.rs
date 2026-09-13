@@ -32,22 +32,18 @@ struct OpenSovdInfo {
 const TARGET: &str = "gw";
 
 const VENDOR_INFO: OpenSovdInfo = OpenSovdInfo {
-    version: env!("CARGO_PKG_VERSION"),
+    version: env!("VERSION"),
     sha1: env!("COMMIT_SHA"),
     build_date: env!("BUILD_DATE"),
     name: "OpenSOVD",
 };
 
-//#[tokio::main(flavor = "current_thread")]
-#[tokio::main(flavor = "multi_thread", worker_threads = 1)]
+#[tokio::main(flavor = "current_thread")]
 #[allow(clippy::print_stderr)]
 async fn main() -> ExitCode {
     let cli = cli::Cli::parse();
 
-    if let Err(e) = libcli::init_tracing(
-        "gw=info,srv=info,tower_http=debug,axum=trace,opensovd_providers=info",
-        None,
-    ) {
+    if let Err(e) = libcli::init_tracing("gw=info,srv=info,tower_http=debug,axum=trace", None) {
         eprintln!("Failed to initialize tracing: {e}");
         return ExitCode::FAILURE;
     }
@@ -64,6 +60,7 @@ async fn run(mut cli: cli::Cli) -> anyhow::Result<()> {
     tracing::info!(
         target: TARGET,
         version = %VENDOR_INFO.version,
+        channel = %env!("RELEASE_CHANNEL"),
         sha1 = %VENDOR_INFO.sha1,
         build_date = %VENDOR_INFO.build_date,
         "{}", cli::ABOUT);
@@ -90,8 +87,11 @@ fn create_jwt_authenticator(
     let algo: JwtAlgorithm = auth
         .jwt_algo
         .parse()
-        .map_err(|e: String| anyhow::anyhow!(e))?;
-    let key = base64::engine::general_purpose::STANDARD.decode(secret)?;
+        .map_err(|e: String| anyhow::anyhow!(e))
+        .with_context(|| format!("invalid --auth-jwt-algo {:?}", auth.jwt_algo))?;
+    let key = base64::engine::general_purpose::STANDARD
+        .decode(secret)
+        .context("--auth-jwt-secret must be base64-encoded")?;
     let issuer = std::mem::take(&mut auth.jwt_issuer);
 
     tracing::info!(target: TARGET, %algo, %issuer, "JWT authentication enabled");
@@ -99,6 +99,7 @@ fn create_jwt_authenticator(
 }
 
 // Using multiple Discovery Providers simultaneously
+#[allow(dead_code)]
 struct CompositeDiscoveryProvider {
     providers: Vec<Box<dyn opensovd_core::DiscoveryProvider>>,
 }
@@ -165,7 +166,6 @@ where
         .url
         .parse()
         .with_context(|| format!("invalid --url {:?}", cli.url))?;
-    let base_uri = uri.path();
     let authority = uri
         .authority()
         .ok_or_else(|| {
@@ -179,26 +179,6 @@ where
 
     builder = configure_listener(builder, &cli, authority).await?;
     builder = configure_topology(builder, &cli).await;
-
-    let mut discovery_list: Vec<Box<dyn opensovd_core::DiscoveryProvider>> = Vec::new();
-
-    let zenoh_config = opensovd_providers::zenoh::ZenohConfig {
-        endpoint: cli.zenoh.endpoint.clone(), // Uses the IP/Port from CLI arguments
-        discovery_selector: "**".to_string(), // Finds everything; change to "robots/**" if needed
-        robot_name_index: 0,                  // 0 = first part of path is the robot name
-        category: "Zenoh-Telemetry".to_string(),
-    };
-
-    let zenoh_provider = opensovd_providers::zenoh::ZenohProvider::new(zenoh_config).await?;
-    discovery_list.push(Box::new(zenoh_provider));
-    tracing::info!(target: TARGET, "Zenoh discovery provider added to list");
-
-    if !discovery_list.is_empty() {
-        let combined_provider = CompositeDiscoveryProvider {
-            providers: discovery_list,
-        };
-        builder = builder.discovery(Box::new(combined_provider));
-    }
 
     #[cfg(feature = "tls")]
     {
@@ -237,7 +217,7 @@ where
     let server = builder
         .layer(libcli::trace::trace_layer())
         .layer(tower::util::option_layer(cors))
-        .base_uri(base_uri)?
+        .base_uri(uri)?
         .vendor_info(VENDOR_INFO)
         .build()?;
 
@@ -323,6 +303,7 @@ async fn configure_topology<Vendor, Authn, Authz, Layer>(
 
     #[cfg(not(feature = "mock"))]
     let topology = Topology::default();
+    let _zenoh_endpoint = &cli.zenoh.endpoint;
 
     builder.topology(topology)
 }

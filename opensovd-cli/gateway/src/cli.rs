@@ -13,7 +13,7 @@ pub const ABOUT: &str = "OpenSOVD Gateway Server";
 const DEFAULT_URL: &str = "http://localhost:7690/sovd";
 
 const VERSION_STRING: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
+    env!("VERSION"),
     " (",
     env!("COMMIT_SHA"),
     " ",
@@ -60,11 +60,12 @@ pub struct Cli {
     #[command(flatten)]
     pub auth: AuthArgs,
 
-    #[command(flatten)]
-    pub zenoh: ZenohArgs,
     #[cfg(feature = "tls")]
     #[command(flatten)]
     pub tls: TlsArgs,
+    
+    #[command(flatten)]
+    pub zenoh: ZenohArgs,
 
     /// Enable mock entities for testing and development.
     #[arg(help_heading = "Options")]

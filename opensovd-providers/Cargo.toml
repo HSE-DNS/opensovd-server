@@ -13,7 +13,6 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-anyhow = { workspace = true }
 opensovd-core = { workspace = true }
 opensovd-models = { workspace = true }
 async-trait = { workspace = true }

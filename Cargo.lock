@@ -1757,6 +1757,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "libcli-build"
+version = "0.1.1"
+dependencies = [
+ "time",
+]
+
+[[package]]
 name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2208,16 +2215,15 @@ dependencies = [
  "futures",
  "http",
  "libcli",
+ "libcli-build",
  "opensovd-core",
  "opensovd-extra",
  "opensovd-mocks",
- "opensovd-providers",
  "opensovd-server",
  "rustls",
  "schemars 1.2.2",
  "sd-notify",
  "serde",
- "time",
  "tokio",
  "tower",
  "tower-http",
@@ -2231,12 +2237,12 @@ dependencies = [
  "anyhow",
  "clap",
  "libcli",
+ "libcli-build",
  "mock-http-connector",
  "opensovd-client",
  "opensovd-models",
  "rmcp",
  "serde_json",
- "time",
  "tokio",
  "tracing",
 ]
@@ -2263,7 +2269,6 @@ dependencies = [
 name = "opensovd-providers"
 version = "0.1.1"
 dependencies = [
- "anyhow",
  "async-trait",
  "futures",
  "indexmap 2.14.2",
