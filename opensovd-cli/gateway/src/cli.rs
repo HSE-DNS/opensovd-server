@@ -63,7 +63,7 @@ pub struct Cli {
     #[cfg(feature = "tls")]
     #[command(flatten)]
     pub tls: TlsArgs,
-    
+
     #[command(flatten)]
     pub zenoh: ZenohArgs,
 

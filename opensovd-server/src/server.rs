@@ -181,21 +181,38 @@ pub struct Server<Vendor = VendorInfo, Authn = NoAuth, Authz = AllowAll, Layer =
 }
 
 #[allow(clippy::expect_used)] // Panic on signal handler failure is intentional
-async fn default_shutdown_signal() {
+fn default_shutdown_signal() -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    if tokio::runtime::Handle::try_current().is_err() {
+        return Box::pin(std::future::pending());
+    }
+
     #[cfg(unix)]
-    let sigterm = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
+    let sigterm = {
+        let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler");
+        async move {
+            signal.recv().await;
+        }
     };
     #[cfg(not(unix))]
     let sigterm = std::future::pending::<()>();
+    #[cfg(unix)]
+    let sigint = {
+        let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+            .expect("failed to install signal handler");
+        async move {
+            signal.recv().await;
+        }
+    };
+    #[cfg(not(unix))]
+    let sigint = tokio::signal::ctrl_c();
 
-    tokio::select! {
-        Ok(()) = tokio::signal::ctrl_c() => tracing::info!(target: "srv", signal = %"SIGINT", "Shutdown signal"),
-        () = sigterm => tracing::info!(target: "srv", signal = %"SIGTERM", "Shutdown signal"),
-    }
+    Box::pin(async move {
+        tokio::select! {
+            () = sigint => tracing::info!(target: "srv", signal = %"SIGINT", "Shutdown signal"),
+            () = sigterm => tracing::info!(target: "srv", signal = %"SIGTERM", "Shutdown signal"),
+        }
+    })
 }
 
 impl ServerBuilder<VendorInfo, NoAuth, AllowAll, Identity> {
