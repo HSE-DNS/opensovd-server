@@ -205,7 +205,9 @@ fn default_shutdown_signal() -> Pin<Box<dyn Future<Output = ()> + Send>> {
         }
     };
     #[cfg(not(unix))]
-    let sigint = tokio::signal::ctrl_c();
+    let sigint = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
 
     Box::pin(async move {
         tokio::select! {

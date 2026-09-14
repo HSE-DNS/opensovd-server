@@ -17,6 +17,12 @@ yanked = "deny"
 ignore = [
     # Unmaintained (not vulnerable) transitive dev-only dependency: paste via mock-http-connector
     { id = "RUSTSEC-2024-0436", reason = "unmaintained transitive dev-only dep (paste via mock-http-connector)" },
+    # Transitive through Zenoh 1.10.1, which requires lz4_flex 0.10; no compatible fixed release is available.
+    { id = "RUSTSEC-2026-0041", reason = "transitive lz4_flex dependency pinned by Zenoh 1.10.1; fixed release requires an incompatible major version" },
+    # Transitive through Zenoh; no patched rsa release is available upstream.
+    { id = "RUSTSEC-2023-0071", reason = "transitive rsa dependency from Zenoh; no patched upstream release is available" },
+    # Transitive through Zenoh; the crate is unmaintained but has no security vulnerability.
+    { id = "RUSTSEC-2025-0134", reason = "unmaintained transitive rustls-pemfile dependency from Zenoh" },
 ]
 
 [licenses]
